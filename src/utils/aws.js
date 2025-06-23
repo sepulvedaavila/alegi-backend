@@ -1,34 +1,58 @@
-import AWS from 'aws-sdk';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
+import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
+import { CloudWatchClient, PutMetricDataCommand } from '@aws-sdk/client-cloudwatch';
 import { logger } from './logger.js';
 
-// Configure AWS
-AWS.config.update({
+// Configure AWS clients
+const s3Client = new S3Client({
   region: process.env.AWS_REGION || 'us-east-1',
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+  }
 });
 
-// Initialize AWS services
-const s3 = new AWS.S3();
-const sqs = new AWS.SQS();
-const lambda = new AWS.Lambda();
+const sqsClient = new SQSClient({
+  region: process.env.AWS_REGION || 'us-east-1',
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+  }
+});
+
+const lambdaClient = new LambdaClient({
+  region: process.env.AWS_REGION || 'us-east-1',
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+  }
+});
+
+const cloudwatchClient = new CloudWatchClient({
+  region: process.env.AWS_REGION || 'us-east-1',
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+  }
+});
 
 // Upload file to S3
 export async function uploadToS3(file, key) {
   try {
     logger.info('Uploading file to S3', { key });
 
-    const params = {
+    const command = new PutObjectCommand({
       Bucket: process.env.S3_BUCKET,
       Key: key,
       Body: file,
       ContentType: file.type,
       ACL: 'private'
-    };
+    });
 
-    const result = await s3.upload(params).promise();
+    const result = await s3Client.send(command);
     
-    logger.info('File uploaded successfully', { key, location: result.Location });
+    logger.info('File uploaded successfully', { key });
     return result;
   } catch (error) {
     logger.error('Error uploading to S3', { error: error.message, key });
@@ -41,12 +65,12 @@ export async function downloadFromS3(key) {
   try {
     logger.info('Downloading file from S3', { key });
 
-    const params = {
+    const command = new GetObjectCommand({
       Bucket: process.env.S3_BUCKET,
       Key: key
-    };
+    });
 
-    const result = await s3.getObject(params).promise();
+    const result = await s3Client.send(command);
     
     logger.info('File downloaded successfully', { key });
     return result.Body;
@@ -61,12 +85,12 @@ export async function deleteFromS3(key) {
   try {
     logger.info('Deleting file from S3', { key });
 
-    const params = {
+    const command = new DeleteObjectCommand({
       Bucket: process.env.S3_BUCKET,
       Key: key
-    };
+    });
 
-    await s3.deleteObject(params).promise();
+    await s3Client.send(command);
     
     logger.info('File deleted successfully', { key });
     return { success: true };
@@ -81,12 +105,12 @@ export async function sendToSQS(message, queueUrl = process.env.SQS_QUEUE_URL) {
   try {
     logger.info('Sending message to SQS', { queueUrl });
 
-    const params = {
+    const command = new SendMessageCommand({
       MessageBody: JSON.stringify(message),
       QueueUrl: queueUrl
-    };
+    });
 
-    const result = await sqs.sendMessage(params).promise();
+    const result = await sqsClient.send(command);
     
     logger.info('Message sent to SQS', { messageId: result.MessageId });
     return result;
@@ -101,15 +125,15 @@ export async function invokeLambda(functionName, payload) {
   try {
     logger.info('Invoking Lambda function', { functionName });
 
-    const params = {
+    const command = new InvokeCommand({
       FunctionName: functionName,
       Payload: JSON.stringify(payload)
-    };
+    });
 
-    const result = await lambda.invoke(params).promise();
+    const result = await lambdaClient.send(command);
     
     logger.info('Lambda function invoked', { functionName, statusCode: result.StatusCode });
-    return JSON.parse(result.Payload);
+    return JSON.parse(new TextDecoder().decode(result.Payload));
   } catch (error) {
     logger.error('Error invoking Lambda', { error: error.message, functionName });
     throw error;
@@ -135,4 +159,4 @@ export async function processDocument(documentId, s3Key) {
     logger.error('Error processing document', { error: error.message, documentId });
     throw error;
   }
-} 
+}

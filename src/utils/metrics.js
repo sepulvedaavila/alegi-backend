@@ -1,9 +1,13 @@
-import AWS from 'aws-sdk';
+import { CloudWatchClient, PutMetricDataCommand } from '@aws-sdk/client-cloudwatch';
 import { logger } from './logger.js';
 
 // Initialize CloudWatch
-const cloudwatch = new AWS.CloudWatch({
-  region: process.env.AWS_REGION || 'us-east-1'
+const cloudwatchClient = new CloudWatchClient({
+  region: process.env.AWS_REGION || 'us-east-1',
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+  }
 });
 
 // Custom metrics class
@@ -83,12 +87,12 @@ class Metrics {
       for (let i = 0; i < this.metrics.length; i += batchSize) {
         const batch = this.metrics.slice(i, i + batchSize);
         
-        const params = {
+        const command = new PutMetricDataCommand({
           Namespace: this.namespace,
           MetricData: batch
-        };
+        });
 
-        await cloudwatch.putMetricData(params).promise();
+        await cloudwatchClient.send(command);
       }
 
       logger.info('Metrics sent to CloudWatch', { count: this.metrics.length });
@@ -114,4 +118,4 @@ if (process.env.NODE_ENV === 'production') {
   metrics.startAutoSend();
 }
 
-export { metrics }; 
+export { metrics };

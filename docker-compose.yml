@@ -3,15 +3,18 @@ version: '3.8'
 services:
   redis:
     image: redis:7-alpine
+    container_name: alegi-redis
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
-    restart: unless-stopped
+    networks:
+      - alegi-network
 
   mongodb:
-    image: mongo:6
+    image: mongo:7
+    container_name: alegi-mongodb
     ports:
       - "27017:27017"
     environment:
@@ -20,23 +23,70 @@ services:
       MONGO_INITDB_DATABASE: alegi
     volumes:
       - mongodb_data:/data/db
-    restart: unless-stopped
+    networks:
+      - alegi-network
 
-  # Optional: Local S3 compatible storage
-  minio:
-    image: minio/minio:latest
+  localstack:
+    image: localstack/localstack:latest
+    container_name: alegi-localstack
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "4566:4566"
+      - "4571:4571"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      - SERVICES=s3,sqs,lambda,cloudwatch
+      - DEBUG=1
+      - DATA_DIR=/tmp/localstack/data
+      - LAMBDA_EXECUTOR=docker
+      - DOCKER_HOST=unix:///var/run/docker.sock
     volumes:
-      - minio_data:/data
-    command: server /data --console-address ":9001"
-    restart: unless-stopped
+      - "./localstack:/tmp/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    networks:
+      - alegi-network
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alegi-backend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - REDIS_HOST=redis
+      - MONGODB_URI=mongodb://admin:password@mongodb:27017/alegi?authSource=admin
+      - AWS_ENDPOINT=http://localstack:4566
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_REGION=us-east-1
+    volumes:
+      - ./src:/app/src
+      - ./api:/app/api
+    depends_on:
+      - redis
+      - mongodb
+      - localstack
+    networks:
+      - alegi-network
+    command: npm run dev
+
+  bull-board:
+    image: deadly0/bull-board
+    container_name: alegi-bull-board
+    ports:
+      - "3001:3000"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - redis
+    networks:
+      - alegi-network
+
+networks:
+  alegi-network:
+    driver: bridge
 
 volumes:
   redis_data:
   mongodb_data:
-  minio_data: 
