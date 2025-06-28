@@ -110,3 +110,5 @@ Thumbs.db
 # Lambda deployment packages
 *.zip
 function.zip 
+
+blueprint.json

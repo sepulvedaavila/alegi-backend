@@ -44,12 +44,16 @@ jobs:
       - name: Run tests
         run: npm test
         env:
+          NODE_ENV: test
           REDIS_HOST: localhost
           REDIS_PORT: 6379
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }} # TODO: Add Supabase URL
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }} # TODO: Add Supabase Service Key
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} # TODO: Add OpenAI API key  
-          REDIS_URL: redis://localhost:6379 # TODO: Add Redis URL
+          REDIS_URL: redis://localhost:6379
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
 
   deploy-staging:
     name: Deploy to Staging

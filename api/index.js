@@ -1,17 +1,48 @@
-// Remove AWS SDK
-// const AWS = require('aws-sdk');
+// Alternative Node.js/Express Backend for Alegi
 
-// Remove S3 initialization
-// const s3 = new AWS.S3({...});
-
-// Add Supabase storage functions
+// api/index.js - Main entry point for Vercel
+const express = require('express');
+const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const { createClient } = require('@supabase/supabase-js');
+const OpenAI = require('openai');
+const Redis = require('ioredis');
+const path = require('path');
 
-// Initialize Supabase (already exists)
+const app = express();
+
+// Middleware setup
+app.use(helmet());
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production' 
+    ? ['https://alegi.io', 'https://app.alegi.io']
+    : ['http://localhost:3000', 'http://localhost:5173'],
+  credentials: true
+}));
+
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true }));
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: 'Too many requests from this IP'
+});
+app.use('/api/', limiter);
+
+// Initialize services
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 );
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
+
+const redis = new Redis(process.env.REDIS_URL);
 
 // Updated file upload function
 async function uploadToSupabaseStorage(file, caseId) {
@@ -21,7 +52,7 @@ async function uploadToSupabaseStorage(file, caseId) {
     const filePath = `documents/${caseId}/${fileName}`;
     
     // Upload to Supabase Storage
-    const { data, error } = await supabase.storage
+    const { error } = await supabase.storage
       .from('case-files')
       .upload(filePath, file.buffer, {
         contentType: file.mimetype,
@@ -38,11 +69,87 @@ async function uploadToSupabaseStorage(file, caseId) {
     return {
       path: filePath,
       url: urlData.publicUrl,
-      fileName: fileName
+      fileName
     };
   } catch (error) {
+    // eslint-disable-next-line no-console
     console.error('Supabase storage upload error:', error);
     throw error;
+  }
+}
+
+// Authentication middleware
+const authenticateJWT = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  
+  if (!authHeader) {
+    return res.status(401).json({ error: 'No authorization header' });
+  }
+
+  const token = authHeader.split(' ')[1];
+  
+  try {
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error) throw error;
+    
+    req.user = data.user;
+    next();
+  } catch (error) {
+    return res.status(403).json({ error: 'Invalid token' });
+  }
+};
+
+// Queue processing functions
+async function queueDocumentProcessing(caseId, documentId) {
+  try {
+    await redis.lpush('document-processing-queue', JSON.stringify({ caseId, documentId }));
+    // eslint-disable-next-line no-console
+    console.log(`Queued document ${documentId} for processing`);
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to queue document processing:', error);
+  }
+}
+
+// Document processing functions
+async function extractTextFromDocument(documentBuffer) {
+  // Placeholder for document text extraction
+  // In production, use a service like PDF.co, AWS Textract, or similar
+  return 'Extracted text from document...';
+}
+
+async function enrichWithAI(caseId, documentText) {
+  try {
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a legal AI assistant. Analyze the provided legal document and extract key insights, predictions, and strategic recommendations.'
+        },
+        {
+          role: 'user',
+          content: `Analyze this legal document for case ${caseId}: ${documentText}`
+        }
+      ],
+      max_tokens: 1000
+    });
+
+    return {
+      predictions: completion.choices[0].message.content,
+      confidence: 0.85,
+      strategies: ['Strategy 1', 'Strategy 2'],
+      rawResponse: completion.choices[0].message.content
+    };
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('AI enrichment failed:', error);
+    return {
+      predictions: 'Analysis failed',
+      confidence: 0,
+      strategies: [],
+      rawResponse: error.message
+    };
   }
 }
 
@@ -69,13 +176,15 @@ app.post('/api/cases/:caseId/documents', authenticateJWT, async (req, res) => {
     
     // Save to database
     const { data, error } = await supabase
-      .from('case_documents')
+      .from('case_evidence')
       .insert({
         case_id: caseId,
         file_name: file.originalname,
         file_path: uploadResult.path,
         file_url: uploadResult.url,
         file_size: file.size,
+        type: 'document',
+        description: `Uploaded document: ${file.originalname}`,
         uploaded_by: req.user.id
       })
       .select()
@@ -94,6 +203,7 @@ app.post('/api/cases/:caseId/documents', authenticateJWT, async (req, res) => {
     });
     
   } catch (error) {
+    // eslint-disable-next-line no-console
     console.error('Document upload error:', error);
     res.status(500).json({ error: 'Failed to upload document' });
   }
@@ -171,7 +281,7 @@ async function processDocumentBackground(caseId, documentId) {
   try {
     // Get document details
     const { data: document } = await supabase
-      .from('case_documents')
+      .from('case_evidence')
       .select('*')
       .eq('id', documentId)
       .single();
@@ -197,10 +307,10 @@ async function processDocumentBackground(caseId, documentId) {
     
     // Update database
     await supabase
-      .from('case_documents')
+      .from('case_evidence')
       .update({
         processed: true,
-        extracted_text: extractedText,
+        ai_extracted_text: extractedText,
         processing_completed_at: new Date().toISOString()
       })
       .eq('id', documentId);
@@ -216,9 +326,11 @@ async function processDocumentBackground(caseId, documentId) {
         raw_gpt_response: aiAnalysis.rawResponse
       });
     
+    // eslint-disable-next-line no-console
     console.log(`Document ${documentId} processed successfully`);
     
   } catch (error) {
+    // eslint-disable-next-line no-console
     console.error(`Document processing failed for ${documentId}:`, error);
     
     // Log error to database
@@ -232,3 +344,50 @@ async function processDocumentBackground(caseId, documentId) {
       });
   }
 }
+
+// Webhook routes
+const webhookRoutes = require('../routes/webhooks');
+app.use('/api/webhooks', webhookRoutes);
+
+// Case intake endpoint
+app.post('/api/cases/intake', authenticateJWT, async (req, res) => {
+  try {
+    const { case_name, case_description, case_type, jurisdiction } = req.body;
+    
+    // Validate input
+    if (!case_name || !case_description) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    
+    // Create case in database
+    const { data, error } = await supabase
+      .from('cases')
+      .insert({
+        case_name,
+        case_description,
+        case_type,
+        jurisdiction,
+        user_id: req.user.id,
+        status: 'pending',
+        created_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+      
+    if (error) throw error;
+    
+    res.json({
+      success: true,
+      case_id: data.id,
+      message: 'Case submitted successfully'
+    });
+    
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Case intake error:', error);
+    res.status(500).json({ error: 'Failed to submit case' });
+  }
+});
+
+// Export for Vercel
+module.exports = app;

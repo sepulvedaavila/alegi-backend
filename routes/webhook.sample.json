@@ -1,0 +1,24 @@
+{
+    "type": "INSERT",
+    "table": "case_briefs",
+    "record": {
+      "id": "123dca0b-1897-4ae6-9e65-c2f9dc23514d",
+      "user_id": "bc41c20d-ed24-45d9-ad19-a9f52e5c6d60",
+      "case_name": "",
+      "case_type": null,
+      "case_stage": "Assessing filing",
+      "created_at": "2025-06-28T20:27:05.410232+00:00",
+      "date_filed": null,
+      "updated_at": "2025-06-28T20:27:05.410232+00:00",
+      "case_number": null,
+      "jurisdiction": "Colorado - Denver",
+      "applicable_law": null,
+      "case_narrative": "On or about June 15, 2019, Defendant hired Plaintiff as a Senior Software Engineer at an annual salary of $1000.\nThroughout Plaintiff's employment, Plaintiff consistently received positive performance reviews, with ratings of \"Exceeds Expectations\" in 2020, 2021, 2022, and 2023.\nIn January 2023, Plaintiff was promoted to Lead Software Engineer with an increased salary of $1500 annually.",
+      "additional_notes": null,
+      "expected_outcome": "For compensatory damages according to proof at trial",
+      "history_narrative": null,
+      "attorneys_of_record": []
+    },
+    "schema": "public",
+    "old_record": null
+  }
