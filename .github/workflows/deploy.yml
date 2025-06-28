@@ -9,7 +9,6 @@ on:
 
 env:
   NODE_VERSION: '18'
-  AWS_REGION: us-east-1
 
 jobs:
   test:
@@ -28,10 +27,10 @@ jobs:
           - 6379:6379
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -47,76 +46,23 @@ jobs:
         env:
           REDIS_HOST: localhost
           REDIS_PORT: 6379
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-      
-      - name: Generate coverage report
-        run: npm run test:coverage
-      
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
-        with:
-          file: ./coverage/lcov.info
-
-  build:
-    name: Build
-    needs: test
-    runs-on: ubuntu-latest
-    
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-      
-      - name: Install dependencies
-        run: npm ci --only=production
-      
-      - name: Build Lambda deployment package
-        run: |
-          cd lambda/document-processor
-          npm ci --only=production
-          zip -r ../../document-processor.zip .
-      
-      - name: Upload Lambda artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: lambda-deployment
-          path: document-processor.zip
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }} # TODO: Add Supabase URL
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }} # TODO: Add Supabase Service Key
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} # TODO: Add OpenAI API key  
+          REDIS_URL: redis://localhost:6379 # TODO: Add Redis URL
 
   deploy-staging:
     name: Deploy to Staging
-    needs: build
+    needs: test
     if: github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
     environment: staging
     
     steps:
-      - uses: actions/checkout@v3
-      
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-      
-      - name: Download Lambda artifact
-        uses: actions/download-artifact@v3
-        with:
-          name: lambda-deployment
-      
-      - name: Deploy Lambda function
-        run: |
-          aws lambda update-function-code \
-            --function-name staging-alegi-document-processor \
-            --zip-file fileb://document-processor.zip
+      - uses: actions/checkout@v4
       
       - name: Deploy to Vercel (Staging)
-        uses: amondnet/vercel-action@v20
+        uses: amondnet/vercel-action@v25
         with:
           vercel-token: ${{ secrets.VERCEL_TOKEN }}
           vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
@@ -126,34 +72,16 @@ jobs:
 
   deploy-production:
     name: Deploy to Production
-    needs: build
+    needs: test
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production
     
     steps:
-      - uses: actions/checkout@v3
-      
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-      
-      - name: Download Lambda artifact
-        uses: actions/download-artifact@v3
-        with:
-          name: lambda-deployment
-      
-      - name: Deploy Lambda function
-        run: |
-          aws lambda update-function-code \
-            --function-name prod-alegi-document-processor \
-            --zip-file fileb://document-processor.zip
+      - uses: actions/checkout@v4
       
       - name: Deploy to Vercel (Production)
-        uses: amondnet/vercel-action@v20
+        uses: amondnet/vercel-action@v25
         with:
           vercel-token: ${{ secrets.VERCEL_TOKEN }}
           vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
@@ -163,7 +91,11 @@ jobs:
       
       - name: Run smoke tests
         run: |
-          curl -f https://api.alegi.io/health || exit 1
+          # Wait for deployment to complete
+          sleep 30
+          curl -f ${{ secrets.API_URL }}/api/health || exit 1
+        env:
+          API_URL: ${{ secrets.API_URL }}
       
       - name: Notify deployment
         uses: 8398a7/action-slack@v3
@@ -172,40 +104,3 @@ jobs:
           text: 'Production deployment completed'
           webhook_url: ${{ secrets.SLACK_WEBHOOK }}
         if: always()
-
-  infrastructure:
-    name: Deploy Infrastructure
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
-        with:
-          terraform_version: 1.5.0
-      
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-      
-      - name: Terraform Init
-        run: terraform init
-        working-directory: ./terraform
-      
-      - name: Terraform Plan
-        run: |
-          terraform plan \
-            -var="supabase_service_key=${{ secrets.SUPABASE_SERVICE_KEY }}" \
-            -var-file="production.tfvars" \
-            -out=tfplan
-        working-directory: ./terraform
-      
-      - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan
-        working-directory: ./terraform
-        if: github.ref == 'refs/heads/main'

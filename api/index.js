@@ -1,151 +1,56 @@
-// Alternative Node.js/Express Backend for Alegi
-// Since you're comfortable with MERN stack, here's a Node.js alternative
+// Remove AWS SDK
+// const AWS = require('aws-sdk');
 
-// api/index.js - Main entry point for Vercel
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
+// Remove S3 initialization
+// const s3 = new AWS.S3({...});
+
+// Add Supabase storage functions
 const { createClient } = require('@supabase/supabase-js');
-const OpenAI = require('openai');
-const AWS = require('aws-sdk');
-const Redis = require('ioredis');
-const path = require('path');
 
-const app = express();
-
-// Middleware setup
-app.use(helmet());
-app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? ['https://alegi.io', 'https://app.alegi.io']
-    : ['http://localhost:3000', 'http://localhost:5173'],
-  credentials: true
-}));
-
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true }));
-
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP'
-});
-app.use('/api/', limiter);
-
-// Initialize services
+// Initialize Supabase (already exists)
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 );
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
-
-const s3 = new AWS.S3({
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  region: process.env.AWS_REGION
-});
-
-const redis = new Redis(process.env.REDIS_URL);
-
-// Routes
-
-// Health check
-app.get('/api/health', async (req, res) => {
+// Updated file upload function
+async function uploadToSupabaseStorage(file, caseId) {
   try {
-    // Check database connection
-    const { error } = await supabase.from('cases').select('count').limit(1);
+    const fileExt = path.extname(file.originalname);
+    const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 15)}${fileExt}`;
+    const filePath = `documents/${caseId}/${fileName}`;
     
-    res.json({
-      status: 'healthy',
-      timestamp: new Date().toISOString(),
-      environment: process.env.NODE_ENV,
-      services: {
-        database: error ? 'unhealthy' : 'healthy',
-        redis: redis.status,
-        s3: 'healthy' // Basic assumption, could add actual check
-      }
-    });
-  } catch (error) {
-    res.status(503).json({
-      status: 'unhealthy',
-      error: error.message
-    });
-  }
-});
-
-// Authentication middleware
-const authenticateJWT = async (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  
-  if (!authHeader) {
-    return res.status(401).json({ error: 'No authorization header' });
-  }
-
-  const token = authHeader.split(' ')[1];
-  
-  try {
-    const { data, error } = await supabase.auth.getUser(token);
+    // Upload to Supabase Storage
+    const { data, error } = await supabase.storage
+      .from('case-files')
+      .upload(filePath, file.buffer, {
+        contentType: file.mimetype,
+        duplex: false
+      });
+    
     if (error) throw error;
     
-    req.user = data.user;
-    next();
+    // Get public URL
+    const { data: urlData } = supabase.storage
+      .from('case-files')
+      .getPublicUrl(filePath);
+    
+    return {
+      path: filePath,
+      url: urlData.publicUrl,
+      fileName: fileName
+    };
   } catch (error) {
-    return res.status(403).json({ error: 'Invalid token' });
+    console.error('Supabase storage upload error:', error);
+    throw error;
   }
-};
+}
 
-// Case intake endpoint
-app.post('/api/cases/intake', authenticateJWT, async (req, res) => {
-  try {
-    const { case_name, case_description, case_type, jurisdiction } = req.body;
-    
-    // Validate input
-    if (!case_name || !case_description) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-    
-    // Create case in database
-    const { data, error } = await supabase
-      .from('cases')
-      .insert({
-        case_name,
-        case_description,
-        case_type,
-        jurisdiction,
-        user_id: req.user.id,
-        status: 'pending',
-        created_at: new Date().toISOString()
-      })
-      .select()
-      .single();
-      
-    if (error) throw error;
-    
-    // Queue for processing
-    await queueCaseProcessing(data.id);
-    
-    res.json({
-      success: true,
-      case_id: data.id,
-      message: 'Case submitted successfully'
-    });
-    
-  } catch (error) {
-    console.error('Case intake error:', error);
-    res.status(500).json({ error: 'Failed to submit case' });
-  }
-});
-
-// Document upload endpoint
+// Updated document upload endpoint
 app.post('/api/cases/:caseId/documents', authenticateJWT, async (req, res) => {
   try {
     const { caseId } = req.params;
-    const file = req.files?.document; // Assuming multer middleware
+    const file = req.files?.document;
     
     if (!file) {
       return res.status(400).json({ error: 'No file uploaded' });
@@ -159,16 +64,8 @@ app.post('/api/cases/:caseId/documents', authenticateJWT, async (req, res) => {
       return res.status(400).json({ error: 'Invalid file type' });
     }
     
-    // Upload to S3
-    const key = `documents/${caseId}/${Date.now()}-${file.originalname}`;
-    const uploadParams = {
-      Bucket: process.env.S3_BUCKET_NAME,
-      Key: key,
-      Body: file.buffer,
-      ContentType: file.mimetype
-    };
-    
-    const uploadResult = await s3.upload(uploadParams).promise();
+    // Upload to Supabase Storage instead of S3
+    const uploadResult = await uploadToSupabaseStorage(file, caseId);
     
     // Save to database
     const { data, error } = await supabase
@@ -176,7 +73,8 @@ app.post('/api/cases/:caseId/documents', authenticateJWT, async (req, res) => {
       .insert({
         case_id: caseId,
         file_name: file.originalname,
-        file_url: uploadResult.Location,
+        file_path: uploadResult.path,
+        file_url: uploadResult.url,
         file_size: file.size,
         uploaded_by: req.user.id
       })
@@ -191,6 +89,7 @@ app.post('/api/cases/:caseId/documents', authenticateJWT, async (req, res) => {
     res.json({
       success: true,
       document_id: data.id,
+      file_url: uploadResult.url,
       message: 'Document uploaded successfully'
     });
     
@@ -200,124 +99,74 @@ app.post('/api/cases/:caseId/documents', authenticateJWT, async (req, res) => {
   }
 });
 
-// Case status endpoint
-app.get('/api/cases/:caseId/status', authenticateJWT, async (req, res) => {
+// Updated health check
+app.get('/api/health', async (req, res) => {
   try {
-    const { caseId } = req.params;
+    const checks = {
+      database: 'healthy',
+      redis: redis.status,
+      storage: 'healthy'
+    };
     
-    const { data, error } = await supabase
-      .from('cases')
-      .select(`
-        *,
-        case_documents (*),
-        case_ai_enrichment (*)
-      `)
-      .eq('id', caseId)
-      .eq('user_id', req.user.id)
-      .single();
-      
-    if (error) throw error;
+    // Check database connection
+    const { error: dbError } = await supabase.from('cases').select('count').limit(1);
+    if (dbError) checks.database = 'unhealthy';
     
-    if (!data) {
-      return res.status(404).json({ error: 'Case not found' });
+    // Check Supabase storage
+    try {
+      const { data: buckets, error: storageError } = await supabase.storage.listBuckets();
+      if (storageError || !buckets.find(b => b.name === 'case-files')) {
+        checks.storage = 'unhealthy';
+      }
+    } catch (e) {
+      checks.storage = 'unhealthy';
     }
+    
+    const healthy = Object.values(checks).every(check => check === 'healthy');
+    
+    res.status(healthy ? 200 : 503).json({
+      status: healthy ? 'healthy' : 'unhealthy',
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV,
+      services: checks
+    });
+  } catch (error) {
+    res.status(503).json({
+      status: 'unhealthy',
+      error: error.message
+    });
+  }
+});
+
+// Adding this test endpoint temporarily
+app.get('/api/test/storage', authenticateJWT, async (req, res) => {
+  try {
+    // Test bucket access
+    const { data: buckets } = await supabase.storage.listBuckets();
+    
+    // Test file listing
+    const { data: files } = await supabase.storage
+      .from('case-files')
+      .list('documents', {
+        limit: 10,
+        sortBy: { column: 'created_at', order: 'desc' }
+      });
     
     res.json({
       success: true,
-      case: data,
-      processing_status: await getProcessingStatus(caseId)
+      buckets: buckets?.map(b => b.name),
+      recentFiles: files?.length || 0,
+      message: 'Supabase Storage is working correctly'
     });
-    
   } catch (error) {
-    console.error('Status check error:', error);
-    res.status(500).json({ error: 'Failed to get case status' });
-  }
-});
-
-// AI predictions endpoint
-app.get('/api/cases/:caseId/predictions', authenticateJWT, async (req, res) => {
-  try {
-    const { caseId } = req.params;
-    
-    const { data, error } = await supabase
-      .from('case_ai_enrichment')
-      .select('*')
-      .eq('case_id', caseId)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
-      
-    if (error) throw error;
-    
-    res.json({
-      success: true,
-      predictions: data
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
-    
-  } catch (error) {
-    console.error('Predictions error:', error);
-    res.status(404).json({ error: 'No predictions available' });
   }
 });
 
-// Webhook handlers
-app.post('/api/webhooks/supabase/case-created', async (req, res) => {
-  try {
-    const { type, table, record } = req.body;
-    
-    if (type === 'INSERT' && table === 'cases') {
-      await initializeCaseProcessing(record.id);
-      res.json({ status: 'processing_initiated' });
-    } else {
-      res.status(400).json({ error: 'Invalid webhook payload' });
-    }
-  } catch (error) {
-    console.error('Webhook error:', error);
-    res.status(500).json({ error: 'Webhook processing failed' });
-  }
-});
-
-app.post('/api/webhooks/supabase/document-uploaded', async (req, res) => {
-  try {
-    const { type, table, record } = req.body;
-    
-    if (type === 'INSERT' && table === 'case_documents') {
-      await processDocumentBackground(record.case_id, record.id);
-      res.json({ status: 'document_processing_initiated' });
-    } else {
-      res.status(400).json({ error: 'Invalid webhook payload' });
-    }
-  } catch (error) {
-    console.error('Document webhook error:', error);
-    res.status(500).json({ error: 'Document webhook processing failed' });
-  }
-});
-
-// Helper functions
-
-async function queueCaseProcessing(caseId) {
-  const task = {
-    type: 'case_processing',
-    case_id: caseId,
-    created_at: new Date().toISOString()
-  };
-  
-  await redis.lpush('case_processing_queue', JSON.stringify(task));
-  await redis.setex(`task:${caseId}`, 3600, JSON.stringify(task));
-}
-
-async function queueDocumentProcessing(caseId, documentId) {
-  const task = {
-    type: 'document_processing',
-    case_id: caseId,
-    document_id: documentId,
-    created_at: new Date().toISOString()
-  };
-  
-  await redis.lpush('document_processing_queue', JSON.stringify(task));
-  await redis.setex(`doc_task:${documentId}`, 3600, JSON.stringify(task));
-}
-
+// Updated document processing function
 async function processDocumentBackground(caseId, documentId) {
   try {
     // Get document details
@@ -329,16 +178,19 @@ async function processDocumentBackground(caseId, documentId) {
     
     if (!document) throw new Error('Document not found');
     
-    // Download document from S3
-    const getObjectParams = {
-      Bucket: process.env.S3_BUCKET_NAME,
-      Key: document.file_url.split('/').pop()
-    };
+    // Download document from Supabase Storage
+    const { data: fileData, error: downloadError } = await supabase.storage
+      .from('case-files')
+      .download(document.file_path);
     
-    const documentData = await s3.getObject(getObjectParams).promise();
+    if (downloadError) throw downloadError;
+    
+    // Convert blob to buffer for processing
+    const arrayBuffer = await fileData.arrayBuffer();
+    const documentBuffer = Buffer.from(arrayBuffer);
     
     // Process with PDF.co or similar service
-    const extractedText = await extractTextFromDocument(documentData.Body);
+    const extractedText = await extractTextFromDocument(documentBuffer);
     
     // AI enrichment
     const aiAnalysis = await enrichWithAI(caseId, extractedText);
@@ -379,94 +231,4 @@ async function processDocumentBackground(caseId, documentId) {
         error_stack: error.stack
       });
   }
-}
-
-async function extractTextFromDocument(documentBuffer) {
-  // Implement PDF.co integration or similar
-  // For now, return placeholder
-  return "Extracted text from document...";
-}
-
-async function enrichWithAI(caseId, documentText) {
-  try {
-    const prompt = `
-    Analyze this legal document and provide structured analysis:
-    
-    ${documentText.substring(0, 4000)}
-    
-    Provide response in JSON format with:
-    - predictions (success_probability, estimated_duration_months, likely_outcome)
-    - confidence_score (0-1)
-    - strategy_recommendations (array)
-    - risk_level (low/medium/high)
-    `;
-    
-    const response = await openai.chat.completions.create({
-      model: "gpt-4-turbo-preview",
-      messages: [
-        { role: "system", content: "You are a legal AI assistant." },
-        { role: "user", content: prompt }
-      ],
-      max_tokens: 2000,
-      temperature: 0.3
-    });
-    
-    const rawResponse = response.choices[0].message.content;
-    
-    // Parse JSON response
-    let parsedResponse;
-    try {
-      parsedResponse = JSON.parse(rawResponse);
-    } catch (e) {
-      // Fallback if JSON parsing fails
-      parsedResponse = {
-        predictions: { success_probability: 0.5 },
-        confidence_score: 0.5,
-        strategy_recommendations: ["Review with legal counsel"],
-        risk_level: "medium"
-      };
-    }
-    
-    return {
-      predictions: parsedResponse.predictions,
-      confidence: parsedResponse.confidence_score,
-      strategies: parsedResponse.strategy_recommendations,
-      riskLevel: parsedResponse.risk_level,
-      rawResponse
-    };
-    
-  } catch (error) {
-    console.error('AI enrichment error:', error);
-    return {
-      predictions: { success_probability: 0.5 },
-      confidence: 0.0,
-      strategies: [],
-      error: error.message,
-      rawResponse: ''
-    };
-  }
-}
-
-async function getProcessingStatus(caseId) {
-  const taskData = await redis.get(`task:${caseId}`);
-  if (taskData) {
-    return JSON.parse(taskData);
-  }
-  return { status: 'completed' };
-}
-
-async function initializeCaseProcessing(caseId) {
-  // Initialize any required setup for new cases
-  await queueCaseProcessing(caseId);
-}
-
-// Export for Vercel
-module.exports = app;
-
-// For local development
-if (process.env.NODE_ENV !== 'production') {
-  const PORT = process.env.PORT || 8000;
-  app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-  });
 }
