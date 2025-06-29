@@ -1,7 +1,7 @@
 // Alternative Node.js/Express Backend for Alegi
 
 // IMPORTANT: Import Sentry as early as possible
-require("../instrument.js");
+require('../instrument.js');
 
 // api/index.js - Main entry point for Vercel
 const express = require('express');
@@ -9,8 +9,6 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { createClient } = require('@supabase/supabase-js');
-const OpenAI = require('openai');
-const Redis = require('ioredis');
 const path = require('path');
 
 const app = express();
@@ -41,11 +39,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
 
-const redis = new Redis(process.env.REDIS_URL);
 
 // Updated file upload function
 async function uploadToSupabaseStorage(file, caseId) {
@@ -102,59 +96,29 @@ const authenticateJWT = async (req, res, next) => {
   }
 };
 
-// Queue processing functions
-async function queueDocumentProcessing(caseId, documentId) {
-  try {
-    await redis.lpush('document-processing-queue', JSON.stringify({ caseId, documentId }));
-    // eslint-disable-next-line no-console
-    console.log(`Queued document ${documentId} for processing`);
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('Failed to queue document processing:', error);
-  }
-}
+// Direct processing functions
+const processingService = require('../services/processing.service');
 
-// Document processing functions
-async function extractTextFromDocument(documentBuffer) {
-  // Placeholder for document text extraction
-  // In production, use a service like PDF.co, AWS Textract, or similar
-  return 'Extracted text from document...';
-}
-
-async function enrichWithAI(caseId, documentText) {
+async function processDocumentDirect(caseId, documentId) {
   try {
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a legal AI assistant. Analyze the provided legal document and extract key insights, predictions, and strategic recommendations.'
-        },
-        {
-          role: 'user',
-          content: `Analyze this legal document for case ${caseId}: ${documentText}`
-        }
-      ],
-      max_tokens: 1000
+    // Process immediately in background
+    setImmediate(async () => {
+      try {
+        await processingService.processDocument({ caseId, documentId });
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error('Background document processing failed:', error);
+      }
     });
-
-    return {
-      predictions: completion.choices[0].message.content,
-      confidence: 0.85,
-      strategies: ['Strategy 1', 'Strategy 2'],
-      rawResponse: completion.choices[0].message.content
-    };
+    // eslint-disable-next-line no-console
+    console.log(`Started processing document ${documentId}`);
   } catch (error) {
     // eslint-disable-next-line no-console
-    console.error('AI enrichment failed:', error);
-    return {
-      predictions: 'Analysis failed',
-      confidence: 0,
-      strategies: [],
-      rawResponse: error.message
-    };
+    console.error('Failed to start document processing:', error);
   }
 }
+
+// Document processing functions moved to processing service
 
 // Updated document upload endpoint
 app.post('/api/cases/:caseId/documents', authenticateJWT, async (req, res) => {
@@ -195,8 +159,8 @@ app.post('/api/cases/:caseId/documents', authenticateJWT, async (req, res) => {
       
     if (error) throw error;
     
-    // Queue for processing
-    await queueDocumentProcessing(caseId, data.id);
+    // Process document directly
+    await processDocumentDirect(caseId, data.id);
     
     res.json({
       success: true,
@@ -208,6 +172,17 @@ app.post('/api/cases/:caseId/documents', authenticateJWT, async (req, res) => {
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Document upload error:', error);
+    
+    // Report to Sentry
+    const Sentry = require('@sentry/node');
+    Sentry.captureException(error, {
+      tags: { 
+        operation: 'document_upload',
+        caseId: req.params.caseId 
+      },
+      user: { id: req.user?.id }
+    });
+    
     res.status(500).json({ error: 'Failed to upload document' });
   }
 });
@@ -217,7 +192,6 @@ app.get('/api/health', async (req, res) => {
   try {
     const checks = {
       database: 'healthy',
-      redis: redis.status,
       storage: 'healthy'
     };
     
@@ -279,74 +253,8 @@ app.get('/api/test/storage', authenticateJWT, async (req, res) => {
   }
 });
 
-// Updated document processing function
-async function processDocumentBackground(caseId, documentId) {
-  try {
-    // Get document details
-    const { data: document } = await supabase
-      .from('case_evidence')
-      .select('*')
-      .eq('id', documentId)
-      .single();
-    
-    if (!document) throw new Error('Document not found');
-    
-    // Download document from Supabase Storage
-    const { data: fileData, error: downloadError } = await supabase.storage
-      .from('case-files')
-      .download(document.file_path);
-    
-    if (downloadError) throw downloadError;
-    
-    // Convert blob to buffer for processing
-    const arrayBuffer = await fileData.arrayBuffer();
-    const documentBuffer = Buffer.from(arrayBuffer);
-    
-    // Process with PDF.co or similar service
-    const extractedText = await extractTextFromDocument(documentBuffer);
-    
-    // AI enrichment
-    const aiAnalysis = await enrichWithAI(caseId, extractedText);
-    
-    // Update database
-    await supabase
-      .from('case_evidence')
-      .update({
-        processed: true,
-        ai_extracted_text: extractedText,
-        processing_completed_at: new Date().toISOString()
-      })
-      .eq('id', documentId);
-    
-    // Store AI enrichment
-    await supabase
-      .from('case_ai_enrichment')
-      .upsert({
-        case_id: caseId,
-        predictions: aiAnalysis.predictions,
-        confidence_score: aiAnalysis.confidence,
-        strategy_recommendations: aiAnalysis.strategies,
-        raw_gpt_response: aiAnalysis.rawResponse
-      });
-    
-    // eslint-disable-next-line no-console
-    console.log(`Document ${documentId} processed successfully`);
-    
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error(`Document processing failed for ${documentId}:`, error);
-    
-    // Log error to database
-    await supabase
-      .from('processing_errors')
-      .insert({
-        case_id: caseId,
-        document_id: documentId,
-        error_message: error.message,
-        error_stack: error.stack
-      });
-  }
-}
+// Document processing now handled by processing service
+// This function is kept for backward compatibility but delegates to the service
 
 // Webhook routes
 const webhookRoutes = require('../routes/webhooks');
@@ -388,12 +296,22 @@ app.post('/api/cases/intake', authenticateJWT, async (req, res) => {
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Case intake error:', error);
+    
+    // Report to Sentry
+    const Sentry = require('@sentry/node');
+    Sentry.captureException(error, {
+      tags: { 
+        operation: 'case_intake' 
+      },
+      user: { id: req.user?.id }
+    });
+    
     res.status(500).json({ error: 'Failed to submit case' });
   }
 });
 
 // Sentry error handlers - must be after all routes but before any other error middleware
-const Sentry = require("@sentry/node");
+const Sentry = require('@sentry/node');
 
 // The request handler must be the first middleware on the app
 app.use(Sentry.Handlers.requestHandler());
@@ -405,7 +323,7 @@ app.use(Sentry.Handlers.tracingHandler());
 app.use(Sentry.Handlers.errorHandler());
 
 // Optional fallthrough error handler
-app.use(function onError(err, req, res, next) {
+app.use(function onError(err, req, res, _next) {
   // The error id is attached to `res.sentry` to be returned
   // and optionally displayed to the user for support.
   res.statusCode = 500;

@@ -1,7 +1,7 @@
 // routes/webhooks.js
 const express = require('express');
 const router = express.Router();
-const caseProcessingQueue = require('../queues/case-processing.queue');
+const processingService = require('../services/processing.service');
 const { verifySupabaseWebhook, verifyExternalWebhook } = require('../middleware/webhook-auth');
 
 // External webhook endpoint for case_briefs table
@@ -18,23 +18,23 @@ router.post('/external/case-briefs', verifyExternalWebhook, async (req, res) => 
     
     // Only process INSERT and UPDATE operations
     if (type === 'INSERT' || type === 'UPDATE') {
-      // Add to processing queue with full record data
-      await caseProcessingQueue.add('process-new-case', {
-        caseId: record.id,
-        userId: record.user_id,
-        caseData: record,
-        webhookType: type,
-        table: table,
-        source: 'external'
-      }, {
-        attempts: 3,
-        backoff: {
-          type: 'exponential',
-          delay: 2000
+      // Process directly without queuing
+      setImmediate(async () => {
+        try {
+          await processingService.processNewCase({
+            caseId: record.id,
+            userId: record.user_id,
+            caseData: record,
+            webhookType: type,
+            table: table,
+            source: 'external'
+          });
+        } catch (error) {
+          console.error(`Background processing failed for case ${record.id}:`, error);
         }
       });
       
-      console.log(`Queued case ${record.id} for processing`);
+      console.log(`Started processing case ${record.id}`);
     }
     
     res.json({ 
@@ -59,19 +59,19 @@ router.post('/supabase/case-created', verifySupabaseWebhook, async (req, res) =>
       userId: record.user_id
     });
     
-    // Add to processing queue
-    await caseProcessingQueue.add('process-new-case', {
-      caseId: record.id,
-      userId: record.user_id,
-      caseData: record,
-      webhookType: 'INSERT',
-      table: 'case_briefs',
-      source: 'supabase'
-    }, {
-      attempts: 3,
-      backoff: {
-        type: 'exponential',
-        delay: 2000
+    // Process directly without queuing
+    setImmediate(async () => {
+      try {
+        await processingService.processNewCase({
+          caseId: record.id,
+          userId: record.user_id,
+          caseData: record,
+          webhookType: 'INSERT',
+          table: 'case_briefs',
+          source: 'supabase'
+        });
+      } catch (error) {
+        console.error(`Background processing failed for case ${record.id}:`, error);
       }
     });
     
@@ -87,9 +87,15 @@ router.post('/supabase/document-uploaded', verifySupabaseWebhook, async (req, re
   try {
     const { record } = req.body;
     
-    await caseProcessingQueue.add('process-document', {
-      caseId: record.case_id,
-      documentId: record.id
+    setImmediate(async () => {
+      try {
+        await processingService.processDocument({
+          caseId: record.case_id,
+          documentId: record.id
+        });
+      } catch (error) {
+        console.error(`Background document processing failed for ${record.id}:`, error);
+      }
     });
     
     res.json({ success: true, message: 'Document processing initiated' });
@@ -132,18 +138,18 @@ router.post('/universal', async (req, res) => {
     }
     
     if (table === 'case_briefs' && (type === 'INSERT' || type === 'UPDATE')) {
-      await caseProcessingQueue.add('process-new-case', {
-        caseId: record.id,
-        userId: record.user_id,
-        caseData: record,
-        webhookType: type,
-        table: table,
-        source: webhookSource
-      }, {
-        attempts: 3,
-        backoff: {
-          type: 'exponential',
-          delay: 2000
+      setImmediate(async () => {
+        try {
+          await processingService.processNewCase({
+            caseId: record.id,
+            userId: record.user_id,
+            caseData: record,
+            webhookType: type,
+            table: table,
+            source: webhookSource
+          });
+        } catch (error) {
+          console.error(`Background processing failed for case ${record.id}:`, error);
         }
       });
       
