@@ -1,5 +1,3 @@
-// Alternative Node.js/Express Backend for Alegi
-
 // IMPORTANT: Import Sentry as early as possible
 require('../instrument.js');
 
@@ -203,7 +201,7 @@ app.get('/api/health', async (req, res) => {
       status: 'error',
       message: error.message
     });
-  }
+  } 
 });
 
 // Adding this test endpoint temporarily
