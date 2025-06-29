@@ -15,17 +15,6 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     
-    services:
-      redis:
-        image: redis:7-alpine
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 6379:6379
-
     steps:
       - uses: actions/checkout@v4
       
@@ -45,15 +34,9 @@ jobs:
         run: npm test
         env:
           NODE_ENV: test
-          REDIS_HOST: localhost
-          REDIS_PORT: 6379
-          REDIS_URL: redis://localhost:6379
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: ${{ secrets.AWS_REGION }}
 
   deploy-staging:
     name: Deploy to Staging
@@ -93,18 +76,10 @@ jobs:
           vercel-args: '--prod'
           scope: ${{ secrets.VERCEL_ORG_ID }}
       
-      - name: Run smoke tests
+      - name: Health Check
         run: |
           # Wait for deployment to complete
           sleep 30
           curl -f ${{ secrets.API_URL }}/api/health || exit 1
         env:
           API_URL: ${{ secrets.API_URL }}
-      
-      - name: Notify deployment
-        uses: 8398a7/action-slack@v3
-        with:
-          status: ${{ job.status }}
-          text: 'Production deployment completed'
-          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
-        if: always()
