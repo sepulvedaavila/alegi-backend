@@ -12,6 +12,7 @@
         "deploy": "vercel --prod"
     },
     "dependencies": {
+        "@sentry/node": "^9.33.0",
         "@supabase/supabase-js": "^2.50.2",
         "axios": "^1.10.0",
         "bcryptjs": "^2.4.3",

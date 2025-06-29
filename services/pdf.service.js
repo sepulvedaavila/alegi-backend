@@ -10,7 +10,7 @@ class PDFService {
 
   async extractTextFromURL(fileUrl, fileName) {
     try {
-      // First try PDF.co API (matching Make.com behavior)
+      // First try PDF.co API for high-quality text extraction
       const response = await axios.post(
         `${this.pdfCoBaseUrl}/pdf/convert/to/text`,
         {

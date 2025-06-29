@@ -12,41 +12,65 @@ const caseProcessingQueue = new Bull('case-processing', {
 
 // Process new cases
 caseProcessingQueue.process('process-new-case', async (job) => {
-  const { caseId } = job.data;
+  const { caseId, userId, caseData, webhookType, table, source } = job.data;
   
   try {
-    // Step 1: Get case data
-    const caseData = await supabaseService.getCaseById(caseId);
+    console.log(`Processing case ${caseId} from ${source || 'unknown'} webhook (${webhookType})`);
     
-    // Step 2: Process documents
+    // Step 1: Get case data (use provided data or fetch from database)
+    let caseInfo = caseData;
+    if (!caseInfo) {
+      caseInfo = await supabaseService.getCaseById(caseId);
+    }
+    
+    if (!caseInfo) {
+      throw new Error(`Case ${caseId} not found`);
+    }
+    
+    console.log(`Processing case: ${caseInfo.case_name || 'Unnamed case'} (${caseInfo.case_stage})`);
+    
+    // Step 2: Process documents if any exist
     const documents = await supabaseService.getCaseEvidence(caseId);
     let allDocumentText = '';
     
-    for (const doc of documents) {
-      if (doc.file_path && doc.file_type === 'application/pdf') {
-        const text = await pdfService.processCaseDocument(
-          caseId, 
-          doc.file_path, 
-          doc.file_name
-        );
-        allDocumentText += text + '\n\n';
+    if (documents && documents.length > 0) {
+      console.log(`Found ${documents.length} documents to process`);
+      
+      for (const doc of documents) {
+        if (doc.file_path && doc.file_type === 'application/pdf') {
+          const text = await pdfService.processCaseDocument(
+            caseId, 
+            doc.file_path, 
+            doc.file_name
+          );
+          allDocumentText += text + '\n\n';
+        }
       }
     }
     
-    // Step 3: AI Enrichment
-    const enrichment = await aiService.enrichCaseData(caseData, allDocumentText);
+    // Step 3: AI Enrichment using case narrative and documents
+    const enrichmentData = {
+      caseType: caseInfo.case_type,
+      jurisdiction: caseInfo.jurisdiction,
+      caseNarrative: caseInfo.case_narrative,
+      expectedOutcome: caseInfo.expected_outcome,
+      additionalNotes: caseInfo.additional_notes,
+      documentText: allDocumentText
+    };
+    
+    const enrichment = await aiService.enrichCaseData(caseInfo, allDocumentText);
     await supabaseService.updateCaseAIEnrichment(caseId, enrichment);
     
-    // Step 4: Search for precedents
+    // Step 4: Search for precedents based on case type and jurisdiction
     const precedents = await externalAPIService.searchPrecedents(
-      enrichment.caseType,
-      caseData.jurisdiction,
-      enrichment.keyIssues
+      caseInfo.case_type || enrichment.caseType,
+      caseInfo.jurisdiction,
+      enrichment.keyIssues || []
     );
     
     // Step 5: Generate predictions
     const prediction = await aiService.generateCasePrediction(
-      caseData,
+      caseInfo,
       enrichment,
       precedents
     );
@@ -58,15 +82,42 @@ caseProcessingQueue.process('process-new-case', async (job) => {
         case_id: caseId,
         prediction_data: prediction,
         precedents: precedents,
+        created_at: new Date().toISOString(),
+        webhook_source: source,
+        webhook_type: webhookType
+      });
+    
+    // Step 7: Update case status if needed
+    if (caseInfo.case_stage === 'Assessing filing') {
+      await supabaseService.client
+        .from('case_briefs')
+        .update({
+          case_stage: 'Analysis Complete',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', caseId);
+    }
+    
+    // Step 8: Send notification
+    await emailService.sendCaseProcessedNotification(caseId, caseInfo);
+    
+    console.log(`Successfully processed case ${caseId}`);
+    return { success: true, caseId, enrichment, prediction };
+  } catch (error) {
+    console.error('Case processing error:', error);
+    
+    // Log error to database
+    await supabaseService.client
+      .from('processing_errors')
+      .insert({
+        case_id: caseId,
+        error_message: error.message,
+        error_stack: error.stack,
+        webhook_source: source,
+        webhook_type: webhookType,
         created_at: new Date().toISOString()
       });
     
-    // Step 7: Send notification
-    await emailService.sendCaseProcessedNotification(caseId, caseData);
-    
-    return { success: true, caseId };
-  } catch (error) {
-    console.error('Case processing error:', error);
     throw error;
   }
 });
@@ -96,6 +147,28 @@ caseProcessingQueue.process('process-document', async (job) => {
     return { success: true, documentId };
   } catch (error) {
     console.error('Document processing error:', error);
+    throw error;
+  }
+});
+
+// Re-analyze case when new documents are added
+caseProcessingQueue.process('reanalyze-case', async (job) => {
+  const { caseId } = job.data;
+  
+  try {
+    console.log(`Re-analyzing case ${caseId} due to new documents`);
+    
+    // Re-trigger the main case processing
+    await caseProcessingQueue.add('process-new-case', {
+      caseId,
+      webhookType: 'UPDATE',
+      table: 'case_briefs',
+      source: 'reanalysis'
+    });
+    
+    return { success: true, caseId };
+  } catch (error) {
+    console.error('Case re-analysis error:', error);
     throw error;
   }
 });

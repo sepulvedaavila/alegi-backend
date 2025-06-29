@@ -1,5 +1,8 @@
 // Alternative Node.js/Express Backend for Alegi
 
+// IMPORTANT: Import Sentry as early as possible
+require("../instrument.js");
+
 // api/index.js - Main entry point for Vercel
 const express = require('express');
 const cors = require('cors');
@@ -387,6 +390,26 @@ app.post('/api/cases/intake', authenticateJWT, async (req, res) => {
     console.error('Case intake error:', error);
     res.status(500).json({ error: 'Failed to submit case' });
   }
+});
+
+// Sentry error handlers - must be after all routes but before any other error middleware
+const Sentry = require("@sentry/node");
+
+// The request handler must be the first middleware on the app
+app.use(Sentry.Handlers.requestHandler());
+
+// TracingHandler creates a trace for every incoming request
+app.use(Sentry.Handlers.tracingHandler());
+
+// The error handler must be registered before any other error middleware and after all controllers
+app.use(Sentry.Handlers.errorHandler());
+
+// Optional fallthrough error handler
+app.use(function onError(err, req, res, next) {
+  // The error id is attached to `res.sentry` to be returned
+  // and optionally displayed to the user for support.
+  res.statusCode = 500;
+  res.end(`Internal Server Error: ${res.sentry}\n`);
 });
 
 // Export for Vercel
