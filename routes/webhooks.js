@@ -1,7 +1,17 @@
 // routes/webhooks.js
 const express = require('express');
 const router = express.Router();
-const processingService = require('../services/processing.service');
+// Load processing service with error handling
+let processingService;
+try {
+  processingService = require('../services/processing.service');
+} catch (error) {
+  console.error('Failed to load processing service:', error.message);
+  processingService = {
+    processNewCase: () => Promise.resolve({ success: false, reason: 'Processing service not available' }),
+    processDocument: () => Promise.resolve({ success: false, reason: 'Processing service not available' })
+  };
+}
 const { verifySupabaseWebhook, verifyExternalWebhook } = require('../middleware/webhook-auth');
 
 // External webhook endpoint for case_briefs table

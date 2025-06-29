@@ -1,10 +1,62 @@
 // services/processing.service.js
 const Sentry = require('@sentry/node');
-const supabaseService = require('./supabase.service');
-const pdfService = require('./pdf.service');
-const aiService = require('./ai.service');
-const externalAPIService = require('./external.service');
-const emailService = require('./email.service');
+// Load services with error handling
+let supabaseService, pdfService, aiService, externalAPIService, emailService;
+
+try {
+  supabaseService = require('./supabase.service');
+} catch (error) {
+  console.error('Failed to load supabase service:', error.message);
+  supabaseService = { 
+    getCaseById: () => Promise.reject(new Error('Supabase service not available')),
+    getCaseEvidence: () => Promise.resolve([]),
+    updateCaseAIEnrichment: () => Promise.resolve(),
+    client: {
+      from: () => ({
+        upsert: () => Promise.resolve(),
+        update: () => Promise.resolve(),
+        insert: () => Promise.resolve()
+      })
+    }
+  };
+}
+
+try {
+  pdfService = require('./pdf.service');
+} catch (error) {
+  console.error('Failed to load PDF service:', error.message);
+  pdfService = {
+    processCaseDocument: () => Promise.resolve('PDF processing not available')
+  };
+}
+
+try {
+  aiService = require('./ai.service');
+} catch (error) {
+  console.error('Failed to load AI service:', error.message);
+  aiService = {
+    enrichCaseData: () => Promise.resolve({ caseType: 'unknown', keyIssues: [] }),
+    generateCasePrediction: () => Promise.resolve({ success: false, reason: 'AI service not available' })
+  };
+}
+
+try {
+  externalAPIService = require('./external.service');
+} catch (error) {
+  console.error('Failed to load external API service:', error.message);
+  externalAPIService = {
+    searchPrecedents: () => Promise.resolve([])
+  };
+}
+
+try {
+  emailService = require('./email.service');
+} catch (error) {
+  console.error('Failed to load email service:', error.message);
+  emailService = {
+    sendCaseProcessedNotification: () => Promise.resolve()
+  };
+}
 
 class ProcessingService {
   constructor() {

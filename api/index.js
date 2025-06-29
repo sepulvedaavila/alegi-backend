@@ -1,5 +1,9 @@
 // IMPORTANT: Import Sentry as early as possible
-require('../instrument.js');
+try {
+  require('../instrument.js');
+} catch (error) {
+  console.warn('Failed to load Sentry instrumentation:', error.message);
+}
 
 // api/index.js - Main entry point for Vercel
 const express = require('express');
@@ -10,6 +14,12 @@ const { createClient } = require('@supabase/supabase-js');
 const path = require('path');
 
 const app = express();
+
+// Add startup logging
+console.log('Starting Alegi API server...');
+console.log('Environment:', process.env.NODE_ENV || 'not-set');
+console.log('Has Supabase URL:', !!process.env.SUPABASE_URL);
+console.log('Has Supabase Key:', !!process.env.SUPABASE_SERVICE_KEY);
 
 // Middleware setup
 app.use(helmet());
@@ -31,11 +41,56 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// Initialize services
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
+// Basic test endpoint
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'Alegi API is running',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'not-set'
+  });
+});
+
+app.get('/api', (req, res) => {
+  res.json({ 
+    message: 'Alegi API is running',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'not-set'
+  });
+});
+
+// Initialize services with error handling
+let supabase;
+try {
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
+    throw new Error('Missing Supabase environment variables');
+  }
+  supabase = createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_KEY
+  );
+} catch (error) {
+  console.error('Failed to initialize Supabase:', error.message);
+  // Create a mock supabase object to prevent crashes
+  supabase = {
+    from: () => ({
+      select: () => ({ single: () => Promise.reject(new Error('Supabase not configured')) }),
+      insert: () => Promise.reject(new Error('Supabase not configured')),
+      update: () => Promise.reject(new Error('Supabase not configured')),
+      upsert: () => Promise.reject(new Error('Supabase not configured'))
+    }),
+    storage: {
+      from: () => ({
+        upload: () => Promise.reject(new Error('Supabase storage not configured')),
+        download: () => Promise.reject(new Error('Supabase storage not configured')),
+        getPublicUrl: () => ({ data: { publicUrl: '' } }),
+        listBuckets: () => Promise.reject(new Error('Supabase storage not configured'))
+      })
+    },
+    auth: {
+      getUser: () => Promise.reject(new Error('Supabase auth not configured'))
+    }
+  };
+}
 
 
 
@@ -95,7 +150,18 @@ const authenticateJWT = async (req, res, next) => {
 };
 
 // Direct processing functions
-const processingService = require('../services/processing.service');
+let processingService;
+try {
+  processingService = require('../services/processing.service');
+} catch (error) {
+  console.error('Failed to load processing service:', error.message);
+  // Provide fallback
+  processingService = {
+    processDocument: async () => {
+      throw new Error('Processing service not available');
+    }
+  };
+}
 
 async function processDocumentDirect(caseId, documentId) {
   try {
@@ -236,8 +302,13 @@ app.get('/api/test/storage', authenticateJWT, async (req, res) => {
 // This function is kept for backward compatibility but delegates to the service
 
 // Webhook routes
-const webhookRoutes = require('../routes/webhooks');
-app.use('/api/webhooks', webhookRoutes);
+try {
+  const webhookRoutes = require('../routes/webhooks');
+  app.use('/api/webhooks', webhookRoutes);
+} catch (error) {
+  console.error('Failed to load webhook routes:', error.message);
+  // Continue without webhook routes in case of failure
+}
 
 // Case intake endpoint
 app.post('/api/cases/intake', authenticateJWT, async (req, res) => {
@@ -289,25 +360,37 @@ app.post('/api/cases/intake', authenticateJWT, async (req, res) => {
   }
 });
 
-// Sentry error handlers - must be after all routes but before any other error middleware
-const Sentry = require('@sentry/node');
-
-// The request handler must be the first middleware on the app
-app.use(Sentry.Handlers.requestHandler());
-
-// TracingHandler creates a trace for every incoming request
-app.use(Sentry.Handlers.tracingHandler());
-
-// The error handler must be registered before any other error middleware and after all controllers
-app.use(Sentry.Handlers.errorHandler());
+// Sentry error handlers - only in production
+if (process.env.NODE_ENV === 'production' && process.env.SENTRY_DSN) {
+  try {
+    const Sentry = require('@sentry/node');
+    
+    // The request handler must be the first middleware on the app
+    app.use(Sentry.Handlers.requestHandler());
+    
+    // The error handler must be registered before any other error middleware and after all controllers
+    app.use(Sentry.Handlers.errorHandler());
+  } catch (error) {
+    console.warn('Failed to setup Sentry handlers:', error.message);
+  }
+}
 
 // Optional fallthrough error handler
 app.use(function onError(err, req, res, _next) {
-  // The error id is attached to `res.sentry` to be returned
-  // and optionally displayed to the user for support.
-  res.statusCode = 500;
-  res.end(`Internal Server Error: ${res.sentry}\n`);
+  console.error('Unhandled error:', err);
+  res.status(500).json({
+    error: 'Internal Server Error',
+    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
+  });
 });
 
 // Export for Vercel
 module.exports = app;
+
+// For testing in local environment
+if (require.main === module) {
+  const port = process.env.PORT || 3000;
+  app.listen(port, () => {
+    console.log(`Server running on port ${port}`);
+  });
+}
