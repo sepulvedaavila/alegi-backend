@@ -270,6 +270,77 @@ app.get('/api/health', async (req, res) => {
   } 
 });
 
+// JWT test endpoints (for development/testing)
+if (process.env.NODE_ENV !== 'production') {
+  const jwtUtils = require('../utils/jwt.utils');
+  const internalAuthService = require('../services/internal-auth.service');
+
+  app.get('/api/test/jwt', (req, res) => {
+    try {
+      if (!process.env.SUPABASE_WEBHOOK_SECRET) {
+        return res.status(500).json({
+          error: 'SUPABASE_WEBHOOK_SECRET not configured'
+        });
+      }
+
+      const testUser = internalAuthService.createTestUser();
+      const serviceToken = internalAuthService.getServiceToken('1h');
+
+      res.json({
+        message: 'JWT tokens generated successfully',
+        tokens: {
+          userToken: {
+            token: testUser.token,
+            authHeader: testUser.authHeader,
+            user: testUser.user
+          },
+          serviceToken: {
+            token: serviceToken,
+            authHeader: jwtUtils.createAuthHeader(serviceToken)
+          }
+        },
+        usage: {
+          userTokenExample: `curl -H "Authorization: ${testUser.authHeader}" https://your-api.com/api/cases/intake`,
+          serviceTokenExample: `curl -H "Authorization: ${jwtUtils.createAuthHeader(serviceToken)}" https://your-api.com/api/test/storage`
+        }
+      });
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to generate tokens',
+        message: error.message
+      });
+    }
+  });
+
+  app.get('/api/test/validate-token', (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader) {
+        return res.status(400).json({ error: 'No authorization header provided' });
+      }
+
+      const token = authHeader.split(' ')[1];
+      const decoded = jwtUtils.validateToken(token);
+
+      res.json({
+        message: 'Token is valid',
+        decoded: decoded,
+        tokenInfo: {
+          userId: decoded.sub,
+          email: decoded.email,
+          role: decoded.role,
+          expiresAt: new Date(decoded.exp * 1000).toISOString()
+        }
+      });
+    } catch (error) {
+      res.status(401).json({
+        error: 'Token validation failed',
+        message: error.message
+      });
+    }
+  });
+}
+
 // Adding this test endpoint temporarily
 app.get('/api/test/storage', authenticateJWT, async (req, res) => {
   try {
