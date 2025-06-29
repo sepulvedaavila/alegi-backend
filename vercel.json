@@ -3,23 +3,23 @@
   "builds": [
     {
       "src": "api/index.js",
-      "use": "@vercel/node",
-      "config": {
-        "maxDuration": 30
-      }
+      "use": "@vercel/node@3.0.0"
     }
   ],
   "routes": [
     {
-      "src": "/api/(.*)",
+      "src": "/api/health",
       "dest": "/api/index.js"
     },
     {
-      "src": "/(.*)",
-      "dest": "/api/health"
+      "src": "/api/(.*)",
+      "dest": "/api/index.js"
     }
   ],
-  "env": {
-    "NODE_ENV": "production"
+  "functions": {
+    "api/index.js": {
+      "maxDuration": 30,
+      "memory": 1024
+    }
   }
 }

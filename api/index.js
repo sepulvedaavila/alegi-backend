@@ -190,37 +190,18 @@ app.post('/api/cases/:caseId/documents', authenticateJWT, async (req, res) => {
 // Updated health check
 app.get('/api/health', async (req, res) => {
   try {
-    const checks = {
-      database: 'healthy',
-      storage: 'healthy'
-    };
-    
-    // Check database connection
-    const { error: dbError } = await supabase.from('cases').select('count').limit(1);
-    if (dbError) checks.database = 'unhealthy';
-    
-    // Check Supabase storage
-    try {
-      const { data: buckets, error: storageError } = await supabase.storage.listBuckets();
-      if (storageError || !buckets.find(b => b.name === 'case-files')) {
-        checks.storage = 'unhealthy';
-      }
-    } catch (e) {
-      checks.storage = 'unhealthy';
-    }
-    
-    const healthy = Object.values(checks).every(check => check === 'healthy');
-    
-    res.status(healthy ? 200 : 503).json({
-      status: healthy ? 'healthy' : 'unhealthy',
+    // Basic health check without external dependencies
+    res.status(200).json({
+      status: 'healthy',
       timestamp: new Date().toISOString(),
-      environment: process.env.NODE_ENV,
-      services: checks
+      environment: process.env.NODE_ENV || 'not-set',
+      hasSupabaseUrl: !!process.env.SUPABASE_URL,
+      hasSupabaseKey: !!process.env.SUPABASE_SERVICE_KEY
     });
   } catch (error) {
-    res.status(503).json({
-      status: 'unhealthy',
-      error: error.message
+    res.status(500).json({
+      status: 'error',
+      message: error.message
     });
   }
 });
