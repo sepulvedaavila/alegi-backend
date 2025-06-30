@@ -11,6 +11,7 @@ module.exports = {
     emailService: require('./email.service'),
     externalService: require('./external.service'),
     internalAuthService: require('./internal-auth.service'),
+    aiPrompts: require('./ai-prompts.service'),
     
     // Re-export individual services for backwards compatibility
     SupabaseService: require('./supabase.service'),
@@ -20,5 +21,6 @@ module.exports = {
     PDFService: require('./pdf.service'),
     EmailService: require('./email.service'),
     ExternalService: require('./external.service'),
-    InternalAuthService: require('./internal-auth.service')
+    InternalAuthService: require('./internal-auth.service'),
+    AIPrompts: require('./ai-prompts.service')
   };
