@@ -21,11 +21,15 @@ console.log('Environment:', process.env.NODE_ENV || 'not-set');
 console.log('Has Supabase URL:', !!process.env.SUPABASE_URL);
 console.log('Has Supabase Key:', !!process.env.SUPABASE_SERVICE_KEY);
 
+// IMPORTANT: Trust proxy headers when running behind Vercel
+// This must be set before any middleware that depends on client IP
+app.set('trust proxy', true);
+
 // Middleware setup
 app.use(helmet());
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
-    ? ['https://alegi.io', 'https://app.alegi.io']
+    ? ['https://alegi-frontend.vercel.app/', 'https://app.alegi.io']
     : ['http://localhost:3000', 'http://localhost:5173'],
   credentials: true
 }));
