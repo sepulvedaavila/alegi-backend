@@ -274,6 +274,18 @@ app.get('/api/health', async (req, res) => {
   } 
 });
 
+// Monitoring endpoint
+app.get('/api/monitoring/stats', async (req, res) => {
+  const stats = await supabaseService.getProcessingStats();
+  const errors = await errorTrackingService.getErrorStats();
+  
+  res.json({
+    processing: stats,
+    errors: errors,
+    health: 'operational'
+  });
+});
+
 // JWT test endpoints (for development/testing)
 if (process.env.NODE_ENV !== 'production') {
   const jwtUtils = require('../utils/jwt.utils');

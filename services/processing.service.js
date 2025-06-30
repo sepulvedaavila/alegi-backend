@@ -1,66 +1,13 @@
 // services/processing.service.js
 const Sentry = require('@sentry/node');
-// Load services with error handling
-let supabaseService, pdfService, aiService, externalAPIService, emailService;
-
-try {
-  supabaseService = require('./supabase.service');
-} catch (error) {
-  console.error('Failed to load supabase service:', error.message);
-  supabaseService = { 
-    getCaseById: () => Promise.reject(new Error('Supabase service not available')),
-    getCaseEvidence: () => Promise.resolve([]),
-    updateCaseAIEnrichment: () => Promise.resolve(),
-    client: {
-      from: () => ({
-        upsert: () => Promise.resolve(),
-        update: () => Promise.resolve(),
-        insert: () => Promise.resolve()
-      })
-    }
-  };
-}
-
-try {
-  pdfService = require('./pdf.service');
-} catch (error) {
-  console.error('Failed to load PDF service:', error.message);
-  pdfService = {
-    processCaseDocument: () => Promise.resolve('PDF processing not available')
-  };
-}
-
-try {
-  aiService = require('./ai.service');
-} catch (error) {
-  console.error('Failed to load AI service:', error.message);
-  aiService = {
-    enrichCaseData: () => Promise.resolve({ caseType: 'unknown', keyIssues: [] }),
-    generateCasePrediction: () => Promise.resolve({ success: false, reason: 'AI service not available' })
-  };
-}
-
-try {
-  externalAPIService = require('./external.service');
-} catch (error) {
-  console.error('Failed to load external API service:', error.message);
-  externalAPIService = {
-    searchPrecedents: () => Promise.resolve([])
-  };
-}
-
-try {
-  emailService = require('./email.service');
-} catch (error) {
-  console.error('Failed to load email service:', error.message);
-  emailService = {
-    sendCaseProcessedNotification: () => Promise.resolve()
-  };
-}
+const supabaseService = require('./supabase.service');
+const aiService = require('./ai.service');
+const documentService = require('./document.service');
+const errorTrackingService = require('./error-tracking.service');
 
 class ProcessingService {
   constructor() {
-    this.processingJobs = new Map(); // Track ongoing jobs to prevent duplicates
+    this.processingJobs = new Map();
   }
 
   async processNewCase(jobData) {
@@ -76,105 +23,59 @@ class ProcessingService {
     this.processingJobs.set(jobKey, Date.now());
     
     try {
-      console.log(`Processing case ${caseId} from ${source || 'unknown'} webhook (${webhookType})`);
+      console.log(`Starting case processing for ${caseId} (${webhookType})`);
       
-      // Step 1: Get case data (use provided data or fetch from database)
-      let caseInfo = caseData;
-      if (!caseInfo) {
-        caseInfo = await supabaseService.getCaseById(caseId);
-      }
-      
+      // Step 1: Fetch complete case data
+      const caseInfo = caseData || await supabaseService.getCaseById(caseId);
       if (!caseInfo) {
         throw new Error(`Case ${caseId} not found`);
       }
       
-      console.log(`Processing case: ${caseInfo.case_name || 'Unnamed case'} (${caseInfo.case_stage})`);
+      // Step 2: Fetch case evidence (matching Make scenario)
+      const evidence = await this.fetchCaseEvidence(caseId);
+      console.log(`Found ${evidence.length} evidence records for case ${caseId}`);
       
-      // Step 2: Process documents if any exist
-      const documents = await supabaseService.getCaseEvidence(caseId);
-      let allDocumentText = '';
+      // Step 3: Fetch document content if available
+      const documentContent = await this.fetchDocumentContent(caseId);
       
-      if (documents && documents.length > 0) {
-        console.log(`Found ${documents.length} documents to process`);
-        
-        for (const doc of documents) {
-          if (doc.file_path && doc.file_type === 'application/pdf') {
-            try {
-              const text = await pdfService.processCaseDocument(
-                caseId, 
-                doc.file_path, 
-                doc.file_name
-              );
-              allDocumentText += text + '\n\n';
-            } catch (docError) {
-              console.error(`Failed to process document ${doc.id}:`, docError);
-              Sentry.captureException(docError, {
-                tags: { caseId, documentId: doc.id },
-                contexts: { document: doc }
-              });
-            }
-          }
-        }
-      }
-      
-      // Step 3: AI Enrichment using case narrative and documents
-      const enrichment = await aiService.enrichCaseData(caseInfo, allDocumentText);
-      await supabaseService.updateCaseAIEnrichment(caseId, enrichment);
-      
-      // Step 4: Search for precedents based on case type and jurisdiction
-      let precedents = [];
-      try {
-        precedents = await externalAPIService.searchPrecedents(
-          caseInfo.case_type || enrichment.caseType,
-          caseInfo.jurisdiction,
-          enrichment.keyIssues || []
-        );
-      } catch (precedentError) {
-        console.error('Failed to search precedents:', precedentError);
-        Sentry.captureException(precedentError, {
-          tags: { caseId },
-          contexts: { caseInfo }
-        });
-      }
-      
-      // Step 5: Generate predictions
-      const prediction = await aiService.generateCasePrediction(
+      // Step 4: Run complete AI processing flow
+      const aiResults = await aiService.processCaseComplete(
         caseInfo,
-        enrichment,
-        precedents
+        evidence,
+        documentContent
       );
       
-      // Step 6: Update case with results
-      await supabaseService.client
-        .from('case_predictions')
-        .upsert({
-          case_id: caseId,
-          prediction_data: prediction,
-          precedents: precedents,
-          created_at: new Date().toISOString(),
-          webhook_source: source,
-          webhook_type: webhookType
-        });
-      
-      // Step 7: Update case status if needed
-      if (caseInfo.case_stage === 'Assessing filing') {
-        await supabaseService.client
-          .from('case_briefs')
-          .update({
-            case_stage: 'Analysis Complete',
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', caseId);
+      // Step 5: Process based on results completeness
+      if (this.hasCompleteEnrichment(aiResults)) {
+        await this.processCompleteEnrichment(caseId, aiResults);
+      } else if (this.hasPartialEnrichment(aiResults)) {
+        await this.processPartialEnrichment(caseId, aiResults);
+      } else {
+        await this.processMinimalEnrichment(caseId, aiResults);
       }
       
-      // Step 8: Send notification (non-blocking)
-      this.sendNotificationAsync(caseId, caseInfo);
+      // Step 6: Update case stage if needed
+      if (caseInfo.case_stage === 'Assessing filing') {
+        await this.updateCaseStage(caseId, 'Analysis Complete');
+      }
       
       console.log(`Successfully processed case ${caseId}`);
-      return { success: true, caseId, enrichment, prediction };
+      return { 
+        success: true, 
+        caseId, 
+        enrichment: aiResults.enhancement,
+        prediction: aiResults.prediction 
+      };
       
     } catch (error) {
-      console.error('Case processing error:', error);
+      console.error(`Case processing error for ${caseId}:`, error);
+      
+      // Log error to database
+      await errorTrackingService.logProcessingError(caseId, error, {
+        webhookType,
+        source,
+        step: 'processNewCase'
+      });
       
       // Report to Sentry
       Sentry.captureException(error, {
@@ -182,35 +83,195 @@ class ProcessingService {
         contexts: { jobData }
       });
       
-      // Log error to database
-      try {
-        await supabaseService.client
-          .from('processing_errors')
-          .insert({
-            case_id: caseId,
-            error_message: error.message,
-            error_stack: error.stack,
-            webhook_source: source,
-            webhook_type: webhookType,
-            created_at: new Date().toISOString()
-          });
-      } catch (dbError) {
-        console.error('Failed to log error to database:', dbError);
-      }
-      
       throw error;
     } finally {
-      // Clean up job tracking
       this.processingJobs.delete(jobKey);
     }
   }
 
+  // Fetch case evidence matching Make scenario
+  async fetchCaseEvidence(caseId) {
+    try {
+      const { data: evidence, error } = await supabaseService.client
+        .from('case_evidence')
+        .select('*')
+        .eq('case_id', caseId)
+        .limit(50);
+        
+      if (error) throw error;
+      return evidence || [];
+    } catch (error) {
+      console.error(`Error fetching evidence for case ${caseId}:`, error);
+      await errorTrackingService.logProcessingError(caseId, error, {
+        step: 'fetchCaseEvidence'
+      });
+      return [];
+    }
+  }
+
+  // Fetch document content
+  async fetchDocumentContent(caseId) {
+    try {
+      const { data: documents, error } = await supabaseService.client
+        .from('case_documents')
+        .select('ai_extracted_text, file_path')
+        .eq('case_id', caseId)
+        .limit(10);
+        
+      if (error) throw error;
+      
+      // Combine all document content
+      return documents?.map(doc => doc.ai_extracted_text).join('\n\n') || '';
+    } catch (error) {
+      console.error(`Error fetching documents for case ${caseId}:`, error);
+      return '';
+    }
+  }
+
+  // Check if we have complete enrichment data
+  hasCompleteEnrichment(aiResults) {
+    return aiResults.enhancement?.cause_of_action?.length > 0 &&
+           aiResults.enhancement?.applicable_statute?.length > 0 &&
+           aiResults.enhancement?.enhanced_case_type &&
+           aiResults.prediction;
+  }
+
+  // Check if we have partial enrichment data
+  hasPartialEnrichment(aiResults) {
+    return aiResults.enhancement?.enhanced_case_type ||
+           aiResults.enhancement?.cause_of_action?.length > 0;
+  }
+
+  // Process complete enrichment (all data available)
+  async processCompleteEnrichment(caseId, aiResults) {
+    console.log(`Processing complete enrichment for case ${caseId}`);
+    
+    try {
+      // Update case_ai_enrichment table
+      await supabaseService.updateCaseAIEnrichment(caseId, {
+        cause_of_action: aiResults.enhancement.cause_of_action,
+        applicable_statute: aiResults.enhancement.applicable_statute?.join(', '),
+        applicable_case_law: aiResults.enhancement.applicable_case_law?.join(', '),
+        enhanced_case_type: aiResults.enhancement.enhanced_case_type,
+        jurisdiction_enriched: aiResults.enhancement.jurisdiction_enriched,
+        court_abbreviation: aiResults.enhancement.court_abbreviation,
+        raw_gpt_response: {
+          intake: aiResults.intakeAnalysis,
+          jurisdiction: aiResults.jurisdiction,
+          enhancement: aiResults.enhancement,
+          complexity: aiResults.complexity,
+          prediction: aiResults.prediction
+        }
+      });
+      
+      // Update case_predictions table
+      await supabaseService.client
+        .from('case_predictions')
+        .upsert({
+          case_id: caseId,
+          ...aiResults.prediction,
+          case_complexity_score: aiResults.complexity,
+          created_at: new Date().toISOString()
+        });
+      
+      // Update case_briefs with enriched data
+      await supabaseService.updateCaseBrief(caseId, {
+        ai_processed: true,
+        processing_status: 'complete',
+        success_probability: Math.round(aiResults.prediction.outcome_prediction_score * 100),
+        risk_level: this.calculateRiskLevel(aiResults.prediction.risk_score)
+      });
+      
+    } catch (error) {
+      console.error(`Error updating enrichment for case ${caseId}:`, error);
+      await errorTrackingService.logAIEnrichmentError(caseId, error, aiResults);
+      throw error;
+    }
+  }
+
+  // Process partial enrichment (some data missing)
+  async processPartialEnrichment(caseId, aiResults) {
+    console.log(`Processing partial enrichment for case ${caseId}`);
+    
+    try {
+      // Update with available data
+      await supabaseService.updateCaseAIEnrichment(caseId, {
+        cause_of_action: aiResults.enhancement?.cause_of_action || [],
+        enhanced_case_type: aiResults.enhancement?.enhanced_case_type,
+        jurisdiction_enriched: aiResults.enhancement?.jurisdiction_enriched,
+        raw_gpt_response: aiResults
+      });
+      
+      await supabaseService.updateCaseBrief(caseId, {
+        ai_processed: true,
+        processing_status: 'partial',
+      });
+      
+    } catch (error) {
+      console.error(`Error updating partial enrichment for case ${caseId}:`, error);
+      await errorTrackingService.logAIEnrichmentError(caseId, error, aiResults);
+    }
+  }
+
+  // Process minimal enrichment (fallback)
+  async processMinimalEnrichment(caseId, aiResults) {
+    console.log(`Processing minimal enrichment for case ${caseId}`);
+    
+    try {
+      await supabaseService.updateCaseAIEnrichment(caseId, {
+        raw_gpt_response: aiResults
+      });
+      
+      await supabaseService.updateCaseBrief(caseId, {
+        ai_processed: false,
+        processing_status: 'minimal',
+      });
+      
+      // Log for manual review
+      await errorTrackingService.logProcessingError(caseId, 
+        new Error('Minimal enrichment only'), 
+        { aiResults, severity: 'warning' }
+      );
+      
+    } catch (error) {
+      console.error(`Error updating minimal enrichment for case ${caseId}:`, error);
+    }
+  }
+
+  // Update case stage
+  async updateCaseStage(caseId, newStage) {
+    try {
+      await supabaseService.client
+        .from('case_briefs')
+        .update({
+          case_stage: newStage,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', caseId);
+        
+      console.log(`Updated case ${caseId} stage to: ${newStage}`);
+    } catch (error) {
+      console.error(`Error updating case stage for ${caseId}:`, error);
+    }
+  }
+
+  // Calculate risk level based on score
+  calculateRiskLevel(riskScore) {
+    if (!riskScore) return 'unknown';
+    if (riskScore < 0.3) return 'low';
+    if (riskScore < 0.7) return 'medium';
+    return 'high';
+  }
+
+  // Process document upload
   async processDocument(jobData) {
     const { caseId, documentId } = jobData;
     
     try {
+      console.log(`Processing document ${documentId} for case ${caseId}`);
+      
       const document = await supabaseService.client
-        .from('case_evidence')
+        .from('case_documents')
         .select('*')
         .eq('id', documentId)
         .single();
@@ -219,37 +280,43 @@ class ProcessingService {
         throw new Error(`Document ${documentId} not found`);
       }
       
+      // Process document content
       if (document.data.file_type === 'application/pdf') {
-        await pdfService.processCaseDocument(
-          caseId,
-          document.data.file_path,
-          document.data.file_name
+        const extractedText = await documentService.processPDF(
+          document.data.file_path
         );
         
-        // Trigger re-analysis of the case
-        await this.reanalyzeCase({ caseId });
+        // Update document with extracted text
+        await supabaseService.client
+          .from('case_documents')
+          .update({
+            ai_extracted_text: extractedText,
+            processed: true
+          })
+          .eq('id', documentId);
       }
+      
+      // Trigger case re-analysis
+      await this.reanalyzeCase({ caseId });
       
       return { success: true, documentId };
     } catch (error) {
-      console.error('Document processing error:', error);
-      
-      Sentry.captureException(error, {
-        tags: { caseId, documentId },
-        contexts: { jobData }
+      console.error(`Document processing error for ${documentId}:`, error);
+      await errorTrackingService.logProcessingError(caseId, error, {
+        documentId,
+        step: 'processDocument'
       });
-      
       throw error;
     }
   }
 
+  // Re-analyze case after new document
   async reanalyzeCase(jobData) {
     const { caseId } = jobData;
     
     try {
       console.log(`Re-analyzing case ${caseId} due to new documents`);
       
-      // Re-trigger the main case processing
       await this.processNewCase({
         caseId,
         webhookType: 'UPDATE',
@@ -259,34 +326,15 @@ class ProcessingService {
       
       return { success: true, caseId };
     } catch (error) {
-      console.error('Case re-analysis error:', error);
-      
-      Sentry.captureException(error, {
-        tags: { caseId },
-        contexts: { jobData }
-      });
-      
+      console.error(`Case re-analysis error for ${caseId}:`, error);
       throw error;
     }
   }
 
-  // Non-blocking notification sender
-  async sendNotificationAsync(caseId, caseInfo) {
-    try {
-      await emailService.sendCaseProcessedNotification(caseId, caseInfo);
-    } catch (error) {
-      console.error('Failed to send notification:', error);
-      Sentry.captureException(error, {
-        tags: { caseId },
-        contexts: { caseInfo }
-      });
-    }
-  }
-
-  // Cleanup old job tracking entries (call periodically)
+  // Cleanup old job tracking
   cleanupOldJobs() {
     const now = Date.now();
-    const maxAge = 60000; // 1 minute
+    const maxAge = 300000; // 5 minutes
     
     for (const [key, timestamp] of this.processingJobs.entries()) {
       if (now - timestamp > maxAge) {

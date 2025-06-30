@@ -1,5 +1,5 @@
 # .github/workflows/deploy.yml
-name: Deploy Backend
+name: CI/CD Pipeline
 
 on:
   push:
@@ -8,11 +8,11 @@ on:
     branches: [main]
 
 env:
-  NODE_VERSION: '18'
+  NODE_VERSION: '22.x'
 
 jobs:
   test:
-    name: Test
+    name: Run Tests
     runs-on: ubuntu-latest
     
     steps:
@@ -27,59 +27,28 @@ jobs:
       - name: Install dependencies
         run: npm ci
       
-      - name: Run linter
-        run: npm run lint
-      
       - name: Run tests
         run: npm test
-        env:
-          NODE_ENV: test
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      
+      - name: Run linting
+        run: npm run lint
 
-  deploy-staging:
-    name: Deploy to Staging
-    needs: test
-    if: github.ref == 'refs/heads/develop'
+  build:
+    name: Build Application
     runs-on: ubuntu-latest
-    environment: staging
+    needs: test
     
     steps:
       - uses: actions/checkout@v4
       
-      - name: Deploy to Vercel (Staging)
-        uses: amondnet/vercel-action@v25
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}
-          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-          vercel-args: '--env=preview'
-          scope: ${{ secrets.VERCEL_ORG_ID }}
-
-  deploy-production:
-    name: Deploy to Production
-    needs: test
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    environment: production
-    
-    steps:
-      - uses: actions/checkout@v4
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
       
-      - name: Deploy to Vercel (Production)
-        uses: amondnet/vercel-action@v25
-        with:
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}
-          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-          vercel-args: '--prod'
-          scope: ${{ secrets.VERCEL_ORG_ID }}
+      - name: Install dependencies
+        run: npm ci
       
-      - name: Health Check
-        run: |
-          # Wait for deployment to complete
-          sleep 30
-          curl -f ${{ secrets.API_URL }}/api/health || exit 1
-        env:
-          API_URL: ${{ secrets.API_URL }}
+      - name: Build application
+        run: npm run build
