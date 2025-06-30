@@ -4,7 +4,8 @@ const router = express.Router();
 // Load processing service with error handling
 let processingService;
 try {
-  processingService = require('../services/processing.service');
+  const { processingService: procService } = require('../services');
+  processingService = procService;
 } catch (error) {
   console.error('Failed to load processing service:', error.message);
   processingService = {

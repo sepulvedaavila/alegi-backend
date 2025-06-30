@@ -156,7 +156,8 @@ const authenticateJWT = async (req, res, next) => {
 // Direct processing functions
 let processingService;
 try {
-  processingService = require('../services/processing.service');
+  const { processingService: procService } = require('../services');
+  processingService = procService;
 } catch (error) {
   console.error('Failed to load processing service:', error.message);
   // Provide fallback
@@ -277,7 +278,7 @@ app.get('/api/health', async (req, res) => {
 // JWT test endpoints (for development/testing)
 if (process.env.NODE_ENV !== 'production') {
   const jwtUtils = require('../utils/jwt.utils');
-  const internalAuthService = require('../services/internal-auth.service');
+  const { internalAuthService } = require('../services');
 
   app.get('/api/test/jwt', (req, res) => {
     try {

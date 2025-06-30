@@ -1,4 +1,4 @@
-const { supabaseService, errorTrackingService } = require('../../services');
+const { supabaseService, errorTrackingService, aiService, processingService } = require('../../services');
 
 module.exports = async (req, res) => {
   try {
@@ -8,8 +8,8 @@ module.exports = async (req, res) => {
       timestamp: new Date().toISOString(),
       services: {
         supabase: !!supabaseService,
-        ai: !!require('../../services/ai.service'),
-        processing: !!require('../../services/processing.service')
+        ai: !!aiService,
+        processing: !!processingService
       }
     };
 

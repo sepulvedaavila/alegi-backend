@@ -2,7 +2,7 @@
 const OpenAI = require('openai');
 const Sentry = require('@sentry/node');
 const path = require('path');
-const AI_PROMPTS = require(path.join(__dirname, 'ai-prompts.js'));
+const AI_PROMPTS = require(path.join(__dirname, 'ai-prompts.service.js'));
 
 class AIService {
   constructor() {
