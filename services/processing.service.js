@@ -2,7 +2,7 @@
 const Sentry = require('@sentry/node');
 const supabaseService = require('./supabase.service');
 const aiService = require('./ai.service');
-const documentService = require('./document.service');
+const pdfService = require('./pdf.service');
 const errorTrackingService = require('./error-tracking.service');
 
 class ProcessingService {
@@ -282,8 +282,9 @@ class ProcessingService {
       
       // Process document content
       if (document.data.file_type === 'application/pdf') {
-        const extractedText = await documentService.processPDF(
-          document.data.file_path
+        const extractedText = await pdfService.extractTextFromURL(
+          document.data.file_path,
+          document.data.file_name || 'document.pdf'
         );
         
         // Update document with extracted text
