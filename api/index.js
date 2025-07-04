@@ -296,6 +296,35 @@ app.get('/api/health', async (req, res) => {
   } 
 });
 
+// OpenAI rate limit monitoring endpoint
+app.get('/api/openai/rate-limits', async (req, res) => {
+  try {
+    const { aiService } = require('../services');
+    
+    if (!aiService || typeof aiService.getRateLimitStatus !== 'function') {
+      return res.status(503).json({
+        status: 'error',
+        message: 'AI service not available'
+      });
+    }
+
+    const rateLimitStatus = aiService.getRateLimitStatus();
+    
+    res.status(200).json({
+      status: 'success',
+      timestamp: new Date().toISOString(),
+      rateLimits: rateLimitStatus
+    });
+  } catch (error) {
+    console.error('OpenAI rate limit monitoring error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // JWT test endpoints (for development/testing)
 if (process.env.NODE_ENV !== 'production') {
   const jwtUtils = require('../utils/jwt.utils');

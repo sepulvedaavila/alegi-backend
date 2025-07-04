@@ -33,6 +33,16 @@ module.exports = async (req, res) => {
       }
     }
 
+    // Add OpenAI rate limiting status
+    if (aiService && typeof aiService.getRateLimitStatus === 'function') {
+      try {
+        stats.openaiRateLimits = aiService.getRateLimitStatus();
+      } catch (error) {
+        console.error('Failed to get OpenAI rate limit stats:', error);
+        stats.openaiRateLimits = { error: error.message };
+      }
+    }
+
     res.status(200).json(stats);
   } catch (error) {
     console.error('Monitoring stats error:', error);

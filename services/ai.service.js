@@ -3,12 +3,140 @@ const OpenAI = require('openai');
 const Sentry = require('@sentry/node');
 const courtListenerService = require('./courtlistener.service');
 const { AI_PROMPTS } = require('./ai.prompts');
+const aiConfig = require('./ai.config');
 
 class AIService {
   constructor() {
     this.openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY
     });
+    
+    // OpenAI Rate Limiting Configuration
+    // Based on OpenAI's rate limits: https://platform.openai.com/docs/guides/rate-limits
+    const limits = aiConfig.getLimitsForEnvironment();
+    this.rateLimiter = {
+      // RPM (Requests Per Minute) - conservative limits
+      rpm: limits.rpm,
+      // TPM (Tokens Per Minute) - conservative limits
+      tpm: limits.tpm,
+      // Track usage
+      usage: {
+        requests: new Map(), // Track requests per minute
+        tokens: new Map(),   // Track tokens per minute
+        lastReset: Date.now()
+      }
+    };
+    
+    // Initialize usage tracking
+    this.resetUsageTracking();
+  }
+
+  // Reset usage tracking every minute
+  resetUsageTracking() {
+    const now = Date.now();
+    const minuteAgo = now - 60000; // 1 minute ago
+    
+    // Clean up old entries
+    for (const [timestamp, _] of this.rateLimiter.usage.requests) {
+      if (timestamp < minuteAgo) {
+        this.rateLimiter.usage.requests.delete(timestamp);
+      }
+    }
+    
+    for (const [timestamp, _] of this.rateLimiter.usage.tokens) {
+      if (timestamp < minuteAgo) {
+        this.rateLimiter.usage.tokens.delete(timestamp);
+      }
+    }
+    
+    // Schedule next reset
+    setTimeout(() => this.resetUsageTracking(), 60000);
+  }
+
+  // Check if we can make a request based on rate limits
+  async checkRateLimit(model, estimatedTokens = 1000) {
+    const now = Date.now();
+    const currentMinute = Math.floor(now / 60000) * 60000;
+    
+    // Get limits for this model
+    const rpmLimit = this.rateLimiter.rpm[model] || this.rateLimiter.rpm.default;
+    const tpmLimit = this.rateLimiter.tpm[model] || this.rateLimiter.tpm.default;
+    
+    // Count requests in current minute
+    const requestsThisMinute = this.rateLimiter.usage.requests.get(currentMinute) || 0;
+    const tokensThisMinute = this.rateLimiter.usage.tokens.get(currentMinute) || 0;
+    
+    // Check if we're at the limit
+    if (requestsThisMinute >= rpmLimit) {
+      const waitTime = 60000 - (now - currentMinute);
+      console.log(`Rate limit hit for requests (${requestsThisMinute}/${rpmLimit}). Waiting ${waitTime}ms`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      return this.checkRateLimit(model, estimatedTokens); // Recursive call after waiting
+    }
+    
+    if (tokensThisMinute + estimatedTokens > tpmLimit) {
+      const waitTime = 60000 - (now - currentMinute);
+      console.log(`Rate limit hit for tokens (${tokensThisMinute + estimatedTokens}/${tpmLimit}). Waiting ${waitTime}ms`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      return this.checkRateLimit(model, estimatedTokens); // Recursive call after waiting
+    }
+    
+    // Update usage tracking
+    this.rateLimiter.usage.requests.set(currentMinute, requestsThisMinute + 1);
+    this.rateLimiter.usage.tokens.set(currentMinute, tokensThisMinute + estimatedTokens);
+    
+    return true;
+  }
+
+  // Estimate token count for a request (rough approximation)
+  estimateTokens(text) {
+    // Rough estimation based on configuration
+    return Math.ceil(text.length / aiConfig.tokenEstimation.charactersPerToken);
+  }
+
+  // Rate-limited OpenAI API call wrapper
+  async makeOpenAICall(model, messages, options = {}) {
+    // Estimate tokens for rate limiting
+    const messageText = messages.map(m => m.content).join(' ');
+    const estimatedTokens = this.estimateTokens(messageText);
+    
+    // Check rate limits before making call
+    await this.checkRateLimit(model, estimatedTokens);
+    
+    // Add delay between calls to be extra safe
+    const delayBetweenCalls = aiConfig.delayBetweenCalls;
+    await new Promise(resolve => setTimeout(resolve, delayBetweenCalls));
+    
+    try {
+      const response = await this.openai.chat.completions.create({
+        model,
+        messages,
+        ...options
+      });
+      
+      // Log actual usage for monitoring
+      if (response.usage) {
+        console.log(`OpenAI API call completed:`, {
+          model,
+          promptTokens: response.usage.prompt_tokens,
+          completionTokens: response.usage.completion_tokens,
+          totalTokens: response.usage.total_tokens
+        });
+      }
+      
+      return response;
+    } catch (error) {
+      // Handle rate limit errors specifically
+      if (error.status === 429) {
+        console.log('OpenAI rate limit hit, implementing exponential backoff...');
+        const retryAfter = error.headers?.['retry-after'] || 60;
+        console.log(`Waiting ${retryAfter} seconds before retry...`);
+        await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+        return this.makeOpenAICall(model, messages, options); // Retry once
+      }
+      
+      throw error;
+    }
   }
 
   // Step 1: Legal Case Intake Analysis
@@ -17,13 +145,11 @@ class AIService {
       const { model, temperature, prompt } = AI_PROMPTS.INTAKE_ANALYSIS;
       
       console.log(`Making OpenAI API call for case intake analysis: ${caseData.id}`);
-      const response = await this.openai.chat.completions.create({
-        model,
+      const response = await this.makeOpenAICall(model, [{
+        role: 'user',
+        content: prompt(caseData, evidence, documentContent)
+      }], {
         temperature,
-        messages: [{
-          role: 'user',
-          content: prompt(caseData, evidence, documentContent)
-        }],
         response_format: { type: 'json_object' }
       });
 
@@ -63,13 +189,11 @@ class AIService {
     try {
       const { model, temperature, prompt } = AI_PROMPTS.JURISDICTION_ANALYSIS;
       
-      const response = await this.openai.chat.completions.create({
-        model,
+      const response = await this.makeOpenAICall(model, [{
+        role: 'user',
+        content: prompt(caseData, intakeAnalysis)
+      }], {
         temperature,
-        messages: [{
-          role: 'user',
-          content: prompt(caseData, intakeAnalysis)
-        }],
         response_format: { type: 'json_object' }
       });
 
@@ -92,13 +216,11 @@ class AIService {
     try {
       const { model, temperature, prompt } = AI_PROMPTS.CASE_ENHANCEMENT;
       
-      const response = await this.openai.chat.completions.create({
-        model,
+      const response = await this.makeOpenAICall(model, [{
+        role: 'user',
+        content: prompt(caseData, intakeAnalysis, jurisdiction, courtListenerCases)
+      }], {
         temperature,
-        messages: [{
-          role: 'user',
-          content: prompt(caseData, intakeAnalysis, jurisdiction, courtListenerCases)
-        }],
         response_format: { type: 'json_object' }
       });
 
@@ -124,13 +246,11 @@ class AIService {
     try {
       const { model, temperature, prompt } = AI_PROMPTS.COMPLEXITY_CALCULATION;
       
-      const response = await this.openai.chat.completions.create({
-        model,
-        temperature,
-        messages: [{
-          role: 'user',
-          content: prompt(caseData, enhancement, evidence)
-        }]
+      const response = await this.makeOpenAICall(model, [{
+        role: 'user',
+        content: prompt(caseData, enhancement, evidence)
+      }], {
+        temperature
       });
 
       const complexityText = response.choices[0].message.content.trim();
@@ -153,13 +273,11 @@ class AIService {
     try {
       const { model, temperature, prompt } = AI_PROMPTS.LEGAL_PREDICTION;
       
-      const response = await this.openai.chat.completions.create({
-        model,
+      const response = await this.makeOpenAICall(model, [{
+        role: 'user',
+        content: prompt(enhancement, caseData, complexityScore, courtListenerCases)
+      }], {
         temperature,
-        messages: [{
-          role: 'user',
-          content: prompt(enhancement, caseData, complexityScore, courtListenerCases)
-        }],
         response_format: { type: 'json_object' }
       });
 
@@ -255,8 +373,12 @@ class AIService {
     }
   }
 
-  // Retry logic for failed AI calls
-  async retryAICall(fn, maxRetries = 3, delay = 1000) {
+  // Retry logic for failed AI calls with rate limiting
+  async retryAICall(fn, maxRetries = null, delay = null) {
+    const config = aiConfig.retry;
+    maxRetries = maxRetries || config.maxRetries;
+    delay = delay || config.baseDelay;
+    
     for (let i = 0; i < maxRetries; i++) {
       try {
         return await fn();
@@ -264,9 +386,30 @@ class AIService {
         if (i === maxRetries - 1) throw error;
         
         console.log(`AI call failed, retrying... (${i + 1}/${maxRetries})`);
-        await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, i)));
+        // Exponential backoff with rate limiting consideration
+        const backoffDelay = Math.min(delay * Math.pow(2, i), config.maxDelay);
+        await new Promise(resolve => setTimeout(resolve, backoffDelay));
       }
     }
+  }
+
+  // Get current rate limit status for monitoring
+  getRateLimitStatus() {
+    const now = Date.now();
+    const currentMinute = Math.floor(now / 60000) * 60000;
+    
+    const requestsThisMinute = this.rateLimiter.usage.requests.get(currentMinute) || 0;
+    const tokensThisMinute = this.rateLimiter.usage.tokens.get(currentMinute) || 0;
+    
+    return {
+      currentMinute: new Date(currentMinute).toISOString(),
+      requestsThisMinute,
+      tokensThisMinute,
+      limits: {
+        rpm: this.rateLimiter.rpm,
+        tpm: this.rateLimiter.tpm
+      }
+    };
   }
 }
 
