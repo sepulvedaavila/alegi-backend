@@ -16,6 +16,7 @@ class AIService {
     try {
       const { model, temperature, prompt } = AI_PROMPTS.INTAKE_ANALYSIS;
       
+      console.log(`Making OpenAI API call for case intake analysis: ${caseData.id}`);
       const response = await this.openai.chat.completions.create({
         model,
         temperature,
@@ -26,17 +27,34 @@ class AIService {
         response_format: { type: 'json_object' }
       });
 
+      console.log(`OpenAI API response received for case ${caseData.id}:`, {
+        usage: response.usage,
+        model: response.model
+      });
+      
       const result = JSON.parse(response.choices[0].message.content);
       console.log('Case intake analysis completed:', { caseId: caseData.id });
       
       return result;
     } catch (error) {
-      console.error('Case intake analysis error:', error);
+      console.error('Case intake analysis error:', error.message);
       Sentry.captureException(error, {
         tags: { service: 'ai', operation: 'analyzeCaseIntake' },
         extra: { caseId: caseData.id }
       });
-      throw error;
+      
+      // Return fallback response if OpenAI fails
+      return {
+        case_summary: 'AI analysis temporarily unavailable - manual review required',
+        key_facts: ['Unable to extract facts automatically'],
+        legal_issues: ['Legal issues require manual analysis'],
+        parties: { plaintiffs: ['Unknown'], defendants: ['Unknown'] },
+        claims: ['Claims require manual review'],
+        relief_sought: 'Relief sought requires manual analysis',
+        case_strength_indicators: ['Manual assessment needed'],
+        potential_challenges: ['Challenges require manual review'],
+        error: error.message
+      };
     }
   }
 
@@ -112,14 +130,14 @@ class AIService {
         messages: [{
           role: 'user',
           content: prompt(caseData, enhancement, evidence)
-        }],
-        response_format: { type: 'json_object' }
+        }]
       });
 
-      const result = JSON.parse(response.choices[0].message.content);
-      console.log('Complexity calculation completed:', result);
+      const complexityText = response.choices[0].message.content.trim();
+      const complexityScore = parseInt(complexityText.match(/\d+/)?.[0] || '50');
+      console.log('Complexity calculation completed:', complexityScore);
       
-      return result.case_complexity_score;
+      return Math.min(Math.max(complexityScore, 0), 100);
     } catch (error) {
       console.error('Complexity calculation error:', error);
       Sentry.captureException(error, {

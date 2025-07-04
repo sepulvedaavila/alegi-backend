@@ -9,6 +9,12 @@ class PDFCoService {
 
   async extractText(fileUrl) {
     try {
+      console.log('Making PDF.co API call for text extraction:', fileUrl);
+      
+      if (!this.apiKey) {
+        throw new Error('PDF.co API key not configured');
+      }
+      
       const response = await axios.post(`${this.baseURL}/pdf/convert/to/text`, {
         url: fileUrl,
         inline: true,
@@ -19,13 +25,27 @@ class PDFCoService {
         }
       });
 
+      console.log('PDF.co API response:', {
+        error: response.data.error,
+        url: response.data.url ? 'URL provided' : 'No URL',
+        credits: response.data.credits
+      });
+
       if (response.data.error) {
         throw new Error(response.data.message);
       }
 
-      // Get the extracted text
-      const textResponse = await axios.get(response.data.url);
-      return textResponse.data;
+      // Handle inline response or URL response
+      if (response.data.body) {
+        console.log('PDF text extraction completed (inline), length:', response.data.body.length);
+        return response.data.body;
+      } else if (response.data.url) {
+        const textResponse = await axios.get(response.data.url);
+        console.log('PDF text extraction completed (URL), length:', textResponse.data.length);
+        return textResponse.data;
+      } else {
+        throw new Error('No text content returned from PDF.co API');
+      }
     } catch (error) {
       console.error('PDF.co text extraction error:', error);
       throw error;

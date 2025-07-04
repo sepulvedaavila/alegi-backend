@@ -2,7 +2,7 @@
 const Sentry = require('@sentry/node');
 const supabaseService = require('./supabase.service');
 const aiService = require('./ai.service');
-const pdfService = require('./pdf.service');
+const pdfcoService = require('./pdfco.service');
 const courtListenerService = require('./courtlistener.service');
 const errorTrackingService = require('./error-tracking.service');
 
@@ -312,10 +312,13 @@ class ProcessingService {
       
       // Process document content
       if (document.data.file_type === 'application/pdf') {
-        const extractedText = await pdfService.extractTextFromURL(
-          document.data.file_path,
-          document.data.file_name || 'document.pdf'
-        );
+        // Get public URL for the document
+        const { data: urlData } = supabaseService.client
+          .storage
+          .from('case-files')
+          .getPublicUrl(document.data.file_path);
+          
+        const extractedText = await pdfcoService.extractText(urlData.publicUrl);
         
         // Update document with extracted text
         await supabaseService.client

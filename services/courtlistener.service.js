@@ -4,7 +4,7 @@ const Sentry = require('@sentry/node');
 class CourtListenerService {
   constructor() {
     this.apiKey = process.env.COURTLISTENER_API_KEY;
-    this.baseURL = process.env.COURTLISTENER_BASE_URL || 'https://www.courtlistener.com/api/rest/v3';
+    this.baseURL = process.env.COURTLISTENER_BASE_URL || 'https://www.courtlistener.com/api/rest/v4';
     
     this.client = axios.create({
       baseURL: this.baseURL,
