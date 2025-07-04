@@ -23,7 +23,14 @@ console.log('Has Supabase Key:', !!process.env.SUPABASE_SERVICE_KEY);
 
 // IMPORTANT: Trust proxy headers when running behind Vercel
 // This must be set before any middleware that depends on client IP
-app.set('trust proxy', true);
+// Trust only specific proxy configurations to avoid rate limiting bypass issues
+if (process.env.NODE_ENV === 'production') {
+  // In production (Vercel), trust only the first proxy
+  app.set('trust proxy', 1);
+} else {
+  // In development, trust local proxies
+  app.set('trust proxy', 'loopback, linklocal, uniquelocal');
+}
 
 // Middleware setup
 app.use(helmet());
@@ -41,7 +48,17 @@ app.use(express.urlencoded({ extended: true }));
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP'
+  message: 'Too many requests from this IP',
+  // Use a more specific key generator to handle proxy scenarios
+  keyGenerator: (req) => {
+    // Use X-Forwarded-For header if available, otherwise use IP
+    return req.headers['x-forwarded-for']?.split(',')[0] || req.ip || req.connection.remoteAddress;
+  },
+  // Skip rate limiting for certain paths if needed
+  skip: (req) => {
+    // Skip health check endpoints
+    return req.path === '/' || req.path === '/api';
+  }
 });
 app.use('/api/', limiter);
 
