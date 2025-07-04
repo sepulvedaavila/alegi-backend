@@ -174,7 +174,7 @@ router.post('/universal', async (req, res) => {
 
 async function handleNewCaseBrief(caseBrief, res) {
   try {
-    console.log('Processing new case brief:', caseBrief.id);
+    console.log('Queuing new case brief for processing:', caseBrief.id);
 
     // Update status to processing
     await supabase
@@ -185,115 +185,16 @@ async function handleNewCaseBrief(caseBrief, res) {
       })
       .eq('id', caseBrief.id);
 
-    // Check if API keys are configured
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error('OPENAI_API_KEY not configured');
-    }
+    // Add to case processing queue instead of direct processing
+    await queueService.add('case-processing', {
+      caseId: caseBrief.id,
+      userId: caseBrief.user_id,
+      caseData: caseBrief,
+      webhookType: 'INSERT',
+      source: 'webhook'
+    });
 
-    // Get any existing documents
-    const { data: documents, error: docError } = await supabase
-      .from('case_documents')
-      .select('*')
-      .eq('case_id', caseBrief.id);
-
-    if (docError) {
-      console.error('Error fetching documents:', docError);
-    }
-
-    // Extract text from documents
-    let extractedText = '';
-    if (documents && documents.length > 0) {
-      console.log(`Found ${documents.length} documents for case ${caseBrief.id}`);
-      
-      for (const doc of documents) {
-        if (doc.file_url && !doc.processed) {
-          try {
-            // Check if PDF.co is configured
-            if (!process.env.PDF_CO_API_KEY && !process.env.PDFCO_API_KEY) {
-              console.warn('PDF.co API key not configured, skipping document extraction');
-              continue;
-            }
-
-            console.log('Extracting text from:', doc.file_name);
-            const text = await pdfcoService.extractText(doc.file_url);
-            extractedText += `\n\n--- Document: ${doc.file_name} ---\n${text}`;
-            
-            // Update document
-            await supabase
-              .from('case_documents')
-              .update({ 
-                ai_extracted_text: text,
-                processed: true,
-                processed_at: new Date().toISOString()
-              })
-              .eq('id', doc.id);
-          } catch (error) {
-            console.error(`Failed to extract text from ${doc.file_name}:`, error.message);
-          }
-        } else if (doc.ai_extracted_text) {
-          extractedText += `\n\n--- Document: ${doc.file_name} ---\n${doc.ai_extracted_text}`;
-        }
-      }
-    }
-
-    // Prepare case data
-    const caseData = {
-      id: caseBrief.id,
-      case_title: caseBrief.case_name,
-      case_type: caseBrief.case_type,
-      case_narrative: caseBrief.case_narrative,
-      jurisdiction: caseBrief.jurisdiction,
-      case_stage: caseBrief.case_stage,
-      history_narrative: caseBrief.history_narrative,
-      applicable_law: caseBrief.applicable_law,
-      expected_outcome: caseBrief.expected_outcome,
-      attorneys_of_record: caseBrief.attorneys_of_record
-    };
-
-    console.log('Analyzing case with AI...');
-    const aiAnalysis = await aiService.analyzeCaseIntake(
-      caseData,
-      documents || [],
-      extractedText
-    );
-
-    console.log('AI analysis complete, storing results...');
-
-    // Store AI enrichment
-    const { error: enrichmentError } = await supabase
-      .from('case_ai_enrichment')
-      .insert({
-        case_id: caseBrief.id,
-        predictions: aiAnalysis.predictions || {},
-        confidence_score: aiAnalysis.confidence || 0,
-        similar_cases: aiAnalysis.similarCases || [],
-        key_insights: aiAnalysis.keyInsights || [],
-        recommended_actions: aiAnalysis.recommendedActions || [],
-        created_at: new Date().toISOString()
-      });
-
-    if (enrichmentError) {
-      console.error('Failed to store AI enrichment:', enrichmentError);
-      throw enrichmentError;
-    }
-
-    // Update case brief with success
-    const { error: updateError } = await supabase
-      .from('case_briefs')
-      .update({
-        processing_status: 'completed',
-        ai_processed: true,
-        success_probability: Math.round((aiAnalysis.predictions?.successRate || 0) * 100),
-        risk_level: aiAnalysis.predictions?.riskLevel || 'medium',
-        last_ai_update: new Date().toISOString()
-      })
-      .eq('id', caseBrief.id);
-
-    if (updateError) {
-      console.error('Failed to update case brief:', updateError);
-    }
-
-    console.log('Successfully processed case brief:', caseBrief.id);
+    console.log('Successfully queued case brief for processing:', caseBrief.id);
     return res.status(200).json({ 
       success: true, 
       caseId: caseBrief.id,

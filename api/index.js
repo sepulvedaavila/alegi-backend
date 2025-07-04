@@ -245,14 +245,20 @@ app.post('/api/cases/:caseId/documents', authenticateJWT, async (req, res) => {
       
     if (error) throw error;
     
-    // Process document directly
-    await processDocumentDirect(caseId, data.id);
+    // Add to document processing queue instead of direct processing
+    const queueService = require('../services/queue.service');
+    await queueService.add('document-processing', {
+      documentId: data.id,
+      caseId: caseId,
+      filePath: uploadResult.path,
+      webhookType: 'new_document'
+    });
     
     res.json({
       success: true,
       document_id: data.id,
       file_url: uploadResult.url,
-      message: 'Document uploaded successfully'
+      message: 'Document uploaded successfully and queued for processing'
     });
     
   } catch (error) {
@@ -321,6 +327,140 @@ app.get('/api/openai/rate-limits', async (req, res) => {
       status: 'error',
       message: error.message,
       timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Processing status endpoint
+app.get('/api/cases/:caseId/status', authenticateJWT, async (req, res) => {
+  try {
+    const { caseId } = req.params;
+    
+    // Get case status
+    const { data: caseData, error: caseError } = await supabase
+      .from('case_briefs')
+      .select('processing_status, ai_processed, last_ai_update, success_probability, risk_level')
+      .eq('id', caseId)
+      .single();
+    
+    if (caseError) {
+      return res.status(404).json({ error: 'Case not found' });
+    }
+    
+    // Get AI enrichment if available
+    const { data: enrichment, error: enrichmentError } = await supabase
+      .from('case_ai_enrichment')
+      .select('*')
+      .eq('case_id', caseId)
+      .single();
+    
+    // Get predictions if available
+    const { data: predictions, error: predictionsError } = await supabase
+      .from('case_predictions')
+      .select('*')
+      .eq('case_id', caseId)
+      .single();
+    
+    res.status(200).json({
+      caseId,
+      status: caseData.processing_status,
+      aiProcessed: caseData.ai_processed,
+      lastUpdate: caseData.last_ai_update,
+      successProbability: caseData.success_probability,
+      riskLevel: caseData.risk_level,
+      hasEnrichment: !!enrichment,
+      hasPredictions: !!predictions,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Status check error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: error.message
+    });
+  }
+});
+
+// Document processing status endpoint
+app.get('/api/documents/:documentId/status', authenticateJWT, async (req, res) => {
+  try {
+    const { documentId } = req.params;
+    
+    const { data: document, error } = await supabase
+      .from('case_documents')
+      .select('processing_status, processed, processed_at, ai_extracted_text')
+      .eq('id', documentId)
+      .single();
+    
+    if (error) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    
+    res.status(200).json({
+      documentId,
+      status: document.processing_status,
+      processed: document.processed,
+      processedAt: document.processed_at,
+      hasExtractedText: !!document.ai_extracted_text,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Document status check error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: error.message
+    });
+  }
+});
+
+// Manual trigger for case processing (for cases that might have been missed)
+app.post('/api/cases/:caseId/process', authenticateJWT, async (req, res) => {
+  try {
+    const { caseId } = req.params;
+    
+    // Verify case exists and user has access
+    const { data: caseData, error: caseError } = await supabase
+      .from('case_briefs')
+      .select('*')
+      .eq('id', caseId)
+      .single();
+    
+    if (caseError) {
+      return res.status(404).json({ error: 'Case not found' });
+    }
+    
+    // Add to processing queue
+    const queueService = require('../services/queue.service');
+    await queueService.add('case-processing', {
+      caseId: caseId,
+      userId: req.user.id,
+      caseData: caseData,
+      webhookType: 'MANUAL_TRIGGER',
+      source: 'manual'
+    });
+    
+    // Update status to processing
+    await supabase
+      .from('case_briefs')
+      .update({ 
+        processing_status: 'processing',
+        last_ai_update: new Date().toISOString()
+      })
+      .eq('id', caseId);
+    
+    res.status(200).json({
+      success: true,
+      caseId: caseId,
+      message: 'Case processing triggered successfully'
+    });
+    
+  } catch (error) {
+    console.error('Manual processing trigger error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: error.message
     });
   }
 });
