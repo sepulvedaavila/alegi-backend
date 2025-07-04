@@ -13,6 +13,10 @@ module.exports = {
     internalAuthService: require('./internal-auth.service'),
     aiPrompts: require('./ai-prompts.service'),
     
+    // Real-time and notification services
+    realtimeService: require('./realtime.service'),
+    notificationService: require('./notification.service'),
+    
     // Re-export individual services for backwards compatibility
     SupabaseService: require('./supabase.service'),
     ErrorTrackingService: require('./error-tracking.service'),
@@ -22,5 +26,7 @@ module.exports = {
     EmailService: require('./email.service'),
     ExternalService: require('./external.service'),
     InternalAuthService: require('./internal-auth.service'),
-    AIPrompts: require('./ai-prompts.service')
+    AIPrompts: require('./ai-prompts.service'),
+    RealtimeService: require('./realtime.service'),
+    NotificationService: require('./notification.service')
   };

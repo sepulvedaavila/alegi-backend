@@ -564,6 +564,81 @@ app.get('/api/test/storage', authenticateJWT, async (req, res) => {
   }
 });
 
+// Initialize notification service
+let notificationService;
+try {
+  notificationService = require('../services/notification.service');
+  console.log('Notification service loaded successfully');
+} catch (error) {
+  console.error('Failed to load notification service:', error.message);
+  notificationService = null;
+}
+
+// WebSocket connection statistics
+app.get('/api/realtime/stats', authenticateJWT, (req, res) => {
+  try {
+    if (!notificationService) {
+      return res.json({
+        available: false,
+        message: 'Notification service not available'
+      });
+    }
+    
+    const stats = notificationService.getRealtimeStats();
+    res.json({
+      available: notificationService.isRealtimeAvailable(),
+      stats,
+      message: notificationService.isRealtimeAvailable() ? 'WebSocket service is running' : 'WebSocket service not available'
+    });
+  } catch (error) {
+    res.status(500).json({
+      available: false,
+      error: error.message
+    });
+  }
+});
+
+// Polling endpoint for case status (fallback when WebSocket is not available)
+app.get('/api/cases/:caseId/status', authenticateJWT, async (req, res) => {
+  try {
+    const { caseId } = req.params;
+    
+    if (!notificationService) {
+      return res.status(500).json({ error: 'Notification service not available' });
+    }
+    
+    const status = await notificationService.getCaseStatus(caseId, req.user.id);
+    res.json(status);
+  } catch (error) {
+    console.error('Case status check error:', error);
+    res.status(500).json({
+      error: 'Failed to get case status',
+      message: error.message
+    });
+  }
+});
+
+// Get all cases status for a user
+app.get('/api/cases/status', authenticateJWT, async (req, res) => {
+  try {
+    if (!notificationService) {
+      return res.status(500).json({ error: 'Notification service not available' });
+    }
+    
+    const cases = await notificationService.getUserCasesStatus(req.user.id);
+    res.json({
+      cases,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('User cases status check error:', error);
+    res.status(500).json({
+      error: 'Failed to get cases status',
+      message: error.message
+    });
+  }
+});
+
 // Document processing now handled by processing service
 // This function is kept for backward compatibility but delegates to the service
 
@@ -653,10 +728,30 @@ app.use(function onError(err, req, res, _next) {
 // Export for Vercel
 module.exports = app;
 
+// Initialize WebSocket service
+let realtimeService;
+try {
+  realtimeService = require('../services/realtime.service');
+  console.log('Realtime service loaded successfully');
+} catch (error) {
+  console.error('Failed to load realtime service:', error.message);
+  realtimeService = null;
+}
+
 // For testing in local environment
 if (require.main === module) {
   const port = process.env.PORT || 3000;
-  app.listen(port, () => {
+  const server = app.listen(port, () => {
     console.log(`Server running on port ${port}`);
+    
+    // Initialize WebSocket server
+    if (realtimeService) {
+      realtimeService.initialize(server);
+    }
   });
+} else {
+  // For Vercel deployment, we need to handle WebSocket differently
+  // Vercel doesn't support WebSocket in serverless functions
+  // We'll need to use a separate WebSocket service or polling
+  console.log('Running in serverless environment - WebSocket not available');
 }
