@@ -3,6 +3,7 @@ const Sentry = require('@sentry/node');
 const supabaseService = require('./supabase.service');
 const aiService = require('./ai.service');
 const pdfService = require('./pdf.service');
+const courtListenerService = require('./courtlistener.service');
 const errorTrackingService = require('./error-tracking.service');
 
 class ProcessingService {
@@ -174,6 +175,35 @@ class ProcessingService {
           created_at: new Date().toISOString()
         });
       
+      // Save CourtListener similar cases
+      if (aiResults.courtListenerCases?.length > 0) {
+        // First, delete existing similar cases for this case to avoid duplicates
+        await supabaseService.client
+          .from('similar_cases')
+          .delete()
+          .eq('case_id', caseId);
+        
+        const similarCases = aiResults.courtListenerCases.map(c => ({
+          case_id: caseId,
+          similar_case_id: c.id?.toString() || `cl-${Date.now()}-${Math.random()}`,
+          case_name: c.caseName || c.case_name || 'Unknown Case',
+          court: c.court || 'Unknown Court',
+          date_filed: c.dateFiled || c.date_filed || null,
+          similarity_score: c.score || 0.5,
+          court_listener_url: c.absolute_url || null,
+          citation: c.citation?.join(', ') || null,
+          created_at: new Date().toISOString()
+        }));
+        
+        if (similarCases.length > 0) {
+          await supabaseService.client
+            .from('similar_cases')
+            .insert(similarCases);
+          
+          console.log(`Saved ${similarCases.length} similar cases for case ${caseId}`);
+        }
+      }
+
       // Update case_briefs with enriched data
       await supabaseService.updateCaseBrief(caseId, {
         ai_processed: true,

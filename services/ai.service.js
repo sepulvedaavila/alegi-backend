@@ -1,8 +1,8 @@
 // services/ai.service.js
 const OpenAI = require('openai');
 const Sentry = require('@sentry/node');
-const path = require('path');
-const AI_PROMPTS = require(path.join(__dirname, 'ai-prompts.service.js'));
+const courtListenerService = require('./courtlistener.service');
+const { AI_PROMPTS } = require('./ai.prompts');
 
 class AIService {
   constructor() {
@@ -14,7 +14,7 @@ class AIService {
   // Step 1: Legal Case Intake Analysis
   async analyzeCaseIntake(caseData, evidence, documentContent) {
     try {
-      const { model, temperature, prompt } = AI_PROMPTS.LEGAL_CASE_INTAKE;
+      const { model, temperature, prompt } = AI_PROMPTS.INTAKE_ANALYSIS;
       
       const response = await this.openai.chat.completions.create({
         model,
@@ -41,7 +41,7 @@ class AIService {
   }
 
   // Step 2: Jurisdiction Analysis
-  async analyzeJurisdiction(caseData, caseMetadata) {
+  async analyzeJurisdiction(caseData, intakeAnalysis) {
     try {
       const { model, temperature, prompt } = AI_PROMPTS.JURISDICTION_ANALYSIS;
       
@@ -50,7 +50,7 @@ class AIService {
         temperature,
         messages: [{
           role: 'user',
-          content: prompt(caseData, caseMetadata)
+          content: prompt(caseData, intakeAnalysis)
         }],
         response_format: { type: 'json_object' }
       });
@@ -69,8 +69,8 @@ class AIService {
     }
   }
 
-  // Step 3: Case Enhancement
-  async enhanceCase(caseData, caseMetadata, jurisdiction, evidence) {
+  // Step 3: Case Enhancement with CourtListener data
+  async enhanceCaseDetails(caseData, intakeAnalysis, jurisdiction, courtListenerCases) {
     try {
       const { model, temperature, prompt } = AI_PROMPTS.CASE_ENHANCEMENT;
       
@@ -79,7 +79,7 @@ class AIService {
         temperature,
         messages: [{
           role: 'user',
-          content: prompt(caseData, caseMetadata, jurisdiction, evidence)
+          content: prompt(caseData, intakeAnalysis, jurisdiction, courtListenerCases)
         }],
         response_format: { type: 'json_object' }
       });
@@ -102,16 +102,16 @@ class AIService {
   }
 
   // Step 4: Case Complexity Scoring
-  async calculateComplexity(enrichedData, caseData) {
+  async calculateComplexity(caseData, enhancement, evidence) {
     try {
-      const { model, temperature, prompt } = AI_PROMPTS.CASE_COMPLEXITY;
+      const { model, temperature, prompt } = AI_PROMPTS.COMPLEXITY_CALCULATION;
       
       const response = await this.openai.chat.completions.create({
         model,
         temperature,
         messages: [{
           role: 'user',
-          content: prompt(enrichedData, caseData)
+          content: prompt(caseData, enhancement, evidence)
         }],
         response_format: { type: 'json_object' }
       });
@@ -131,7 +131,7 @@ class AIService {
   }
 
   // Step 5: Legal Prediction
-  async generateLegalPrediction(enrichedData, caseData, complexityScore, evidenceSummary) {
+  async generateLegalPrediction(enhancement, caseData, complexityScore, courtListenerCases) {
     try {
       const { model, temperature, prompt } = AI_PROMPTS.LEGAL_PREDICTION;
       
@@ -140,7 +140,7 @@ class AIService {
         temperature,
         messages: [{
           role: 'user',
-          content: prompt(enrichedData, caseData, complexityScore, evidenceSummary)
+          content: prompt(enhancement, caseData, complexityScore, courtListenerCases)
         }],
         response_format: { type: 'json_object' }
       });
@@ -170,6 +170,7 @@ class AIService {
       enhancement: null,
       complexity: null,
       prediction: null,
+      courtListenerCases: null,
       errors: []
     };
 
@@ -181,15 +182,21 @@ class AIService {
       // Step 2: Jurisdiction Analysis
       results.jurisdiction = await this.analyzeJurisdiction(
         caseData, 
-        results.intakeAnalysis.case_metadata
+        results.intakeAnalysis
       );
       
-      // Step 3: Case Enhancement
-      results.enhancement = await this.enhanceCase(
+      // Step 3: CourtListener Enrichment
+      results.courtListenerCases = await courtListenerService.findSimilarCases({
+        ...caseData,
+        ...results.jurisdiction
+      });
+      
+      // Step 4: Case Enhancement with CourtListener data
+      results.enhancement = await this.enhanceCaseDetails(
         caseData,
-        results.intakeAnalysis.case_metadata,
-        results.jurisdiction.jurisdiction_enriched,
-        results.intakeAnalysis.case_evidence
+        results.intakeAnalysis,
+        results.jurisdiction,
+        results.courtListenerCases
       );
       
       // Merge jurisdiction info into enhancement
@@ -198,22 +205,19 @@ class AIService {
         ...results.jurisdiction
       };
       
-      // Step 4: Complexity Scoring
+      // Step 5: Complexity Calculation
       results.complexity = await this.calculateComplexity(
+        caseData,
         results.enhancement,
-        caseData
+        evidence
       );
       
-      // Step 5: Legal Prediction
-      const evidenceSummary = evidence.map(e => 
-        `${e.type}: ${e.description} ${e.ai_extracted_text || ''}`
-      ).join('\n');
-      
+      // Step 6: Legal Prediction with all enriched data
       results.prediction = await this.generateLegalPrediction(
         results.enhancement,
         caseData,
         results.complexity,
-        evidenceSummary
+        results.courtListenerCases
       );
       
       console.log(`AI processing completed for case ${caseData.id}`);
@@ -221,6 +225,7 @@ class AIService {
       
     } catch (error) {
       console.error(`AI processing failed for case ${caseData.id}:`, error);
+      Sentry.captureException(error);
       results.errors.push({
         step: 'overall',
         error: error.message,

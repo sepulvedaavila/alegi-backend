@@ -1,19 +1,13 @@
 // routes/webhooks.js
 const express = require('express');
 const router = express.Router();
-// Load processing service with error handling
-let processingService;
-try {
-  const { processingService: procService } = require('../services');
-  processingService = procService;
-} catch (error) {
-  console.error('Failed to load processing service:', error.message);
-  processingService = {
-    processNewCase: () => Promise.resolve({ success: false, reason: 'Processing service not available' }),
-    processDocument: () => Promise.resolve({ success: false, reason: 'Processing service not available' })
-  };
-}
+const queueService = require('../services/queue.service');
+const Sentry = require('@sentry/node');
 const { verifySupabaseWebhook, verifyExternalWebhook } = require('../middleware/webhook-auth');
+
+// Initialize queue processors
+require('../workers/case.worker');
+require('../workers/document.worker');
 
 // External webhook endpoint for case_briefs table
 router.post('/external/case-briefs', verifyExternalWebhook, async (req, res) => {
@@ -29,23 +23,16 @@ router.post('/external/case-briefs', verifyExternalWebhook, async (req, res) => 
     
     // Only process INSERT and UPDATE operations
     if (type === 'INSERT' || type === 'UPDATE') {
-      // Process directly without queuing
-      setImmediate(async () => {
-        try {
-          await processingService.processNewCase({
-            caseId: record.id,
-            userId: record.user_id,
-            caseData: record,
-            webhookType: type,
-            table: table,
-            source: 'external'
-          });
-        } catch (error) {
-          console.error(`Background processing failed for case ${record.id}:`, error);
-        }
+      // Add to processing queue
+      await queueService.add('case-processing', {
+        caseId: record.id,
+        userId: record.user_id,
+        caseData: record,
+        webhookType: type,
+        source: 'external'
       });
       
-      console.log(`Started processing case ${record.id}`);
+      console.log(`Added case ${record.id} to processing queue`);
     }
     
     res.json({ 
@@ -70,20 +57,13 @@ router.post('/supabase/case-created', verifySupabaseWebhook, async (req, res) =>
       userId: record.user_id
     });
     
-    // Process directly without queuing
-    setImmediate(async () => {
-      try {
-        await processingService.processNewCase({
-          caseId: record.id,
-          userId: record.user_id,
-          caseData: record,
-          webhookType: 'INSERT',
-          table: 'case_briefs',
-          source: 'supabase'
-        });
-      } catch (error) {
-        console.error(`Background processing failed for case ${record.id}:`, error);
-      }
+    // Add to processing queue
+    await queueService.add('case-processing', {
+      caseId: record.id,
+      userId: record.user_id,
+      caseData: record,
+      webhookType: 'INSERT',
+      source: 'supabase'
     });
     
     res.json({ success: true, message: 'Case processing initiated' });
@@ -98,15 +78,12 @@ router.post('/supabase/document-uploaded', verifySupabaseWebhook, async (req, re
   try {
     const { record } = req.body;
     
-    setImmediate(async () => {
-      try {
-        await processingService.processDocument({
-          caseId: record.case_id,
-          documentId: record.id
-        });
-      } catch (error) {
-        console.error(`Background document processing failed for ${record.id}:`, error);
-      }
+    // Add to document processing queue
+    await queueService.add('document-processing', {
+      documentId: record.id,
+      caseId: record.case_id,
+      filePath: record.file_path,
+      webhookType: 'new_document'
     });
     
     res.json({ success: true, message: 'Document processing initiated' });
@@ -149,19 +126,13 @@ router.post('/universal', async (req, res) => {
     }
     
     if (table === 'case_briefs' && (type === 'INSERT' || type === 'UPDATE')) {
-      setImmediate(async () => {
-        try {
-          await processingService.processNewCase({
-            caseId: record.id,
-            userId: record.user_id,
-            caseData: record,
-            webhookType: type,
-            table: table,
-            source: webhookSource
-          });
-        } catch (error) {
-          console.error(`Background processing failed for case ${record.id}:`, error);
-        }
+      // Add to processing queue
+      await queueService.add('case-processing', {
+        caseId: record.id,
+        userId: record.user_id,
+        caseData: record,
+        webhookType: type,
+        source: webhookSource
       });
       
       res.json({ 
