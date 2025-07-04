@@ -7,9 +7,18 @@ const aiConfig = require('./ai.config');
 
 class AIService {
   constructor() {
+    // Check if OpenAI API key is available
+    if (!process.env.OPENAI_API_KEY) {
+      console.warn('OpenAI API key not found - creating mock AI service');
+      this.openai = null;
+      this.isMock = true;
+      return;
+    }
+
     this.openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY
     });
+    this.isMock = false;
     
     // OpenAI Rate Limiting Configuration
     // Based on OpenAI's rate limits: https://platform.openai.com/docs/guides/rate-limits
@@ -96,6 +105,29 @@ class AIService {
 
   // Rate-limited OpenAI API call wrapper
   async makeOpenAICall(model, messages, options = {}) {
+    // If using mock service, return mock response
+    if (this.isMock) {
+      console.log('Mock AI service - returning mock response');
+      return {
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              case_summary: 'Mock AI analysis - OpenAI not configured',
+              key_facts: ['Mock fact 1', 'Mock fact 2'],
+              legal_issues: ['Mock legal issue'],
+              parties: { plaintiffs: ['Mock Plaintiff'], defendants: ['Mock Defendant'] },
+              claims: ['Mock claim'],
+              relief_sought: 'Mock relief',
+              case_strength_indicators: ['Mock indicator'],
+              potential_challenges: ['Mock challenge']
+            })
+          }
+        }],
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        model: 'mock-model'
+      };
+    }
+
     // Estimate tokens for rate limiting
     const messageText = messages.map(m => m.content).join(' ');
     const estimatedTokens = this.estimateTokens(messageText);

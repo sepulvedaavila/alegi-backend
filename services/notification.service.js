@@ -95,6 +95,19 @@ class NotificationService {
   // Get case processing status
   async getCaseStatus(caseId, userId) {
     try {
+      // Check if we're using a mock client
+      if (supabaseService.isMock) {
+        return {
+          caseId,
+          caseName: 'Mock Case',
+          status: 'pending',
+          lastUpdate: new Date().toISOString(),
+          caseStage: 'intake',
+          timestamp: new Date().toISOString(),
+          mock: true
+        };
+      }
+
       const { data: caseData, error } = await supabaseService.client
         .from('case_briefs')
         .select('id, case_name, processing_status, last_ai_update, case_stage, user_id')
@@ -127,6 +140,19 @@ class NotificationService {
   // Get all cases for a user with their processing status
   async getUserCasesStatus(userId) {
     try {
+      // Check if we're using a mock client
+      if (supabaseService.isMock) {
+        return [{
+          caseId: 'mock-case-1',
+          caseName: 'Mock Case 1',
+          status: 'pending',
+          lastUpdate: new Date().toISOString(),
+          caseStage: 'intake',
+          createdAt: new Date().toISOString(),
+          mock: true
+        }];
+      }
+
       const { data: cases, error } = await supabaseService.client
         .from('case_briefs')
         .select('id, case_name, processing_status, last_ai_update, case_stage, created_at')
@@ -151,15 +177,96 @@ class NotificationService {
 
   // Check if real-time notifications are available
   isRealtimeAvailable() {
+    // On Vercel (production), WebSocket is not available
+    if (process.env.NODE_ENV === 'production') {
+      return false;
+    }
     return !!this.realtimeService;
   }
 
   // Get real-time service statistics
   getRealtimeStats() {
     if (!this.realtimeService) {
-      return null;
+      return {
+        available: false,
+        environment: process.env.NODE_ENV || 'development',
+        message: process.env.NODE_ENV === 'production' 
+          ? 'WebSocket not available on Vercel - using polling fallback'
+          : 'WebSocket service not available'
+      };
     }
-    return this.realtimeService.getStats();
+    return {
+      ...this.realtimeService.getStats(),
+      available: true,
+      environment: process.env.NODE_ENV || 'development'
+    };
+  }
+
+  // Get enhanced case status with processing details
+  async getEnhancedCaseStatus(caseId, userId) {
+    try {
+      // Check if we're using a mock client
+      if (supabaseService.isMock) {
+        return {
+          caseId,
+          caseName: 'Mock Case',
+          status: 'pending',
+          lastUpdate: new Date().toISOString(),
+          caseStage: 'intake',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          aiProcessed: false,
+          processingStartedAt: null,
+          processingCompletedAt: null,
+          timestamp: new Date().toISOString(),
+          mock: true
+        };
+      }
+
+      const { data: caseData, error } = await supabaseService.client
+        .from('case_briefs')
+        .select(`
+          id, 
+          case_name, 
+          processing_status, 
+          last_ai_update, 
+          case_stage, 
+          user_id,
+          created_at,
+          updated_at,
+          ai_processed,
+          processing_started_at,
+          processing_completed_at
+        `)
+        .eq('id', caseId)
+        .single();
+
+      if (error) {
+        throw new Error('Case not found');
+      }
+
+      // Check user access
+      if (caseData.user_id !== userId) {
+        throw new Error('Access denied');
+      }
+
+      return {
+        caseId,
+        caseName: caseData.case_name,
+        status: caseData.processing_status || 'pending',
+        lastUpdate: caseData.last_ai_update,
+        caseStage: caseData.case_stage,
+        createdAt: caseData.created_at,
+        updatedAt: caseData.updated_at,
+        aiProcessed: caseData.ai_processed || false,
+        processingStartedAt: caseData.processing_started_at,
+        processingCompletedAt: caseData.processing_completed_at,
+        timestamp: new Date().toISOString()
+      };
+    } catch (error) {
+      console.error('Failed to get enhanced case status:', error);
+      throw error;
+    }
   }
 }
 

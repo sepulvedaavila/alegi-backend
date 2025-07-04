@@ -11,8 +11,32 @@
   },
   "rewrites": [
     {
+      "source": "/api/health",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/api/realtime/stats",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/api/cases/:caseId/status",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/api/cases/:caseId/updates",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/api/cases/:caseId/enhanced-status",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/api/cases/status",
+      "destination": "/api/index.js"
+    },
+    {
       "source": "/api/(.*)",
-      "destination": "/api"
+      "destination": "/api/index.js"
     }
   ],
   "headers": [

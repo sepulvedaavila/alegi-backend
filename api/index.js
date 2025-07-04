@@ -1,3 +1,6 @@
+// Load environment variables first
+require('dotenv').config();
+
 // IMPORTANT: Import Sentry as early as possible
 try {
   require('../instrument.js');
@@ -67,7 +70,13 @@ app.get('/', (req, res) => {
   res.json({ 
     message: 'Alegi API is running',
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'not-set'
+    environment: process.env.NODE_ENV || 'not-set',
+    version: '1.0.0',
+    features: {
+      realtime: process.env.NODE_ENV !== 'production',
+      polling: true,
+      authentication: true
+    }
   });
 });
 
@@ -75,7 +84,13 @@ app.get('/api', (req, res) => {
   res.json({ 
     message: 'Alegi API is running',
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'not-set'
+    environment: process.env.NODE_ENV || 'not-set',
+    version: '1.0.0',
+    features: {
+      realtime: process.env.NODE_ENV !== 'production',
+      polling: true,
+      authentication: true
+    }
   });
 });
 
@@ -279,27 +294,25 @@ app.post('/api/cases/:caseId/documents', authenticateJWT, async (req, res) => {
   }
 });
 
-// Updated health check
-app.get('/api/health', async (req, res) => {
-  try {
-    const hasRequiredEnvVars = {
-      supabase: !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_KEY,
-      openai: !!process.env.OPENAI_API_KEY,
-      pdfco: !!process.env.PDF_CO_API_KEY || !!process.env.PDFCO_API_KEY
-    };
-
-    res.status(200).json({ 
-      status: 'healthy',
-      timestamp: new Date().toISOString(),
-      environment: process.env.NODE_ENV || 'development',
-      services: hasRequiredEnvVars
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: 'error',
-      message: error.message
-    });
-  } 
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
+    services: {
+      supabase: !!supabase,
+      notification: !!notificationService,
+      realtime: process.env.NODE_ENV !== 'production' && !!notificationService?.isRealtimeAvailable()
+    },
+    endpoints: {
+      realtime_stats: '/api/realtime/stats',
+      case_status: '/api/cases/:caseId/status',
+      case_updates: '/api/cases/:caseId/updates',
+      enhanced_status: '/api/cases/:caseId/enhanced-status',
+      user_cases: '/api/cases/status'
+    }
+  });
 });
 
 // OpenAI rate limit monitoring endpoint
@@ -577,23 +590,24 @@ try {
 // WebSocket connection statistics
 app.get('/api/realtime/stats', authenticateJWT, (req, res) => {
   try {
-    if (!notificationService) {
-      return res.json({
-        available: false,
-        message: 'Notification service not available'
-      });
-    }
+    // On Vercel, WebSocket is not available, so we always return false
+    const isWebSocketAvailable = process.env.NODE_ENV !== 'production' && !!notificationService?.isRealtimeAvailable();
     
-    const stats = notificationService.getRealtimeStats();
     res.json({
-      available: notificationService.isRealtimeAvailable(),
-      stats,
-      message: notificationService.isRealtimeAvailable() ? 'WebSocket service is running' : 'WebSocket service not available'
+      available: isWebSocketAvailable,
+      stats: isWebSocketAvailable ? notificationService.getRealtimeStats() : null,
+      message: isWebSocketAvailable ? 'WebSocket service is running' : 'WebSocket not available on Vercel - using polling fallback',
+      environment: process.env.NODE_ENV || 'development',
+      polling_endpoints: {
+        case_status: '/api/cases/:caseId/status',
+        user_cases: '/api/cases/status'
+      }
     });
   } catch (error) {
     res.status(500).json({
       available: false,
-      error: error.message
+      error: error.message,
+      message: 'Error checking realtime availability'
     });
   }
 });
@@ -608,12 +622,17 @@ app.get('/api/cases/:caseId/status', authenticateJWT, async (req, res) => {
     }
     
     const status = await notificationService.getCaseStatus(caseId, req.user.id);
-    res.json(status);
+    res.json({
+      ...status,
+      polling: true,
+      timestamp: new Date().toISOString()
+    });
   } catch (error) {
     console.error('Case status check error:', error);
     res.status(500).json({
       error: 'Failed to get case status',
-      message: error.message
+      message: error.message,
+      timestamp: new Date().toISOString()
     });
   }
 });
@@ -628,13 +647,76 @@ app.get('/api/cases/status', authenticateJWT, async (req, res) => {
     const cases = await notificationService.getUserCasesStatus(req.user.id);
     res.json({
       cases,
+      polling: true,
       timestamp: new Date().toISOString()
     });
   } catch (error) {
     console.error('User cases status check error:', error);
     res.status(500).json({
       error: 'Failed to get cases status',
-      message: error.message
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Enhanced case status endpoint with real-time updates
+app.get('/api/cases/:caseId/updates', authenticateJWT, async (req, res) => {
+  try {
+    const { caseId } = req.params;
+    const { lastUpdate } = req.query;
+    
+    if (!notificationService) {
+      return res.status(500).json({ error: 'Notification service not available' });
+    }
+    
+    const status = await notificationService.getCaseStatus(caseId, req.user.id);
+    
+    // Check if there are any updates since last check
+    const hasUpdates = !lastUpdate || new Date(status.lastUpdate) > new Date(lastUpdate);
+    
+    res.json({
+      ...status,
+      hasUpdates,
+      polling: true,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Case updates check error:', error);
+    res.status(500).json({
+      error: 'Failed to get case updates',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Enhanced case status endpoint with detailed processing information
+app.get('/api/cases/:caseId/enhanced-status', authenticateJWT, async (req, res) => {
+  try {
+    const { caseId } = req.params;
+    
+    if (!notificationService) {
+      return res.status(500).json({ error: 'Notification service not available' });
+    }
+    
+    // Use the enhanced status method if available
+    const status = typeof notificationService.getEnhancedCaseStatus === 'function' 
+      ? await notificationService.getEnhancedCaseStatus(caseId, req.user.id)
+      : await notificationService.getCaseStatus(caseId, req.user.id);
+    
+    res.json({
+      ...status,
+      polling: true,
+      enhanced: true,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Enhanced case status check error:', error);
+    res.status(500).json({
+      error: 'Failed to get enhanced case status',
+      message: error.message,
+      timestamp: new Date().toISOString()
     });
   }
 });

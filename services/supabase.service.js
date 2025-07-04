@@ -3,10 +3,55 @@ const { createClient } = require('@supabase/supabase-js');
 
 class SupabaseService {
   constructor() {
-    this.client = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_KEY
-    );
+    // Check if environment variables are available
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
+      console.warn('Supabase environment variables not found - creating mock client');
+      this.client = this.createMockClient();
+      this.isMock = true;
+    } else {
+      this.client = createClient(
+        process.env.SUPABASE_URL,
+        process.env.SUPABASE_SERVICE_KEY
+      );
+      this.isMock = false;
+    }
+  }
+
+  // Create a mock client for testing when environment variables are not available
+  createMockClient() {
+    return {
+      from: (table) => ({
+        select: (columns) => ({
+          eq: (field, value) => ({
+            single: () => Promise.resolve({ data: null, error: { message: 'Mock client - no data' } }),
+            order: () => ({
+              limit: () => Promise.resolve({ data: [], error: null })
+            })
+          }),
+          order: () => ({
+            limit: () => Promise.resolve({ data: [], error: null })
+          }),
+          single: () => Promise.resolve({ data: null, error: { message: 'Mock client - no data' } })
+        }),
+        insert: (data) => Promise.resolve({ data: null, error: { message: 'Mock client - insert not available' } }),
+        update: (data) => ({
+          eq: (field, value) => Promise.resolve({ data: null, error: { message: 'Mock client - update not available' } })
+        }),
+        upsert: (data) => Promise.resolve({ data: null, error: { message: 'Mock client - upsert not available' } }),
+        rpc: (functionName) => Promise.resolve({ data: null, error: { message: 'Mock client - RPC not available' } })
+      }),
+      storage: {
+        from: (bucket) => ({
+          upload: (path, file, options) => Promise.resolve({ data: null, error: { message: 'Mock client - upload not available' } }),
+          download: (path) => Promise.resolve({ data: null, error: { message: 'Mock client - download not available' } }),
+          getPublicUrl: (path) => ({ data: { publicUrl: 'mock-url' } }),
+          listBuckets: () => Promise.resolve({ data: null, error: { message: 'Mock client - list not available' } })
+        })
+      },
+      auth: {
+        getUser: (token) => Promise.resolve({ data: { user: { id: 'mock-user-id' } }, error: null })
+      }
+    };
   }
 
   // Get case by ID

@@ -8,6 +8,7 @@
         "start": "node api/index.js",
         "test": "jest",
         "test:watch": "jest --watch",
+        "test:realtime": "node test/test-realtime-endpoints.js",
         "lint": "eslint api/**/*.js",
         "deploy": "vercel --prod"
     },
