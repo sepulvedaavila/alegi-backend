@@ -276,13 +276,17 @@ app.post('/api/cases/:caseId/documents', authenticateJWT, async (req, res) => {
 // Updated health check
 app.get('/api/health', async (req, res) => {
   try {
-    // Basic health check without external dependencies
-    res.status(200).json({
+    const hasRequiredEnvVars = {
+      supabase: !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_KEY,
+      openai: !!process.env.OPENAI_API_KEY,
+      pdfco: !!process.env.PDF_CO_API_KEY || !!process.env.PDFCO_API_KEY
+    };
+
+    res.status(200).json({ 
       status: 'healthy',
       timestamp: new Date().toISOString(),
-      environment: process.env.NODE_ENV || 'not-set',
-      hasSupabaseUrl: !!process.env.SUPABASE_URL,
-      hasSupabaseKey: !!process.env.SUPABASE_SERVICE_KEY
+      environment: process.env.NODE_ENV || 'development',
+      services: hasRequiredEnvVars
     });
   } catch (error) {
     res.status(500).json({
