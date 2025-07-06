@@ -294,26 +294,8 @@ app.post('/api/cases/:caseId/documents', authenticateJWT, async (req, res) => {
   }
 });
 
-// Health check endpoint
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development',
-    services: {
-      supabase: !!supabase,
-      notification: !!notificationService,
-      realtime: process.env.NODE_ENV !== 'production' && !!notificationService?.isRealtimeAvailable()
-    },
-    endpoints: {
-      realtime_stats: '/api/realtime/stats',
-      case_status: '/api/cases/:caseId/status',
-      case_updates: '/api/cases/:caseId/updates',
-      enhanced_status: '/api/cases/:caseId/enhanced-status',
-      user_cases: '/api/cases/status'
-    }
-  });
-});
+// Health check endpoint is handled by /api/health.js via Vercel rewrite
+// This endpoint is removed to avoid conflicts with the comprehensive health check
 
 // OpenAI rate limit monitoring endpoint
 app.get('/api/openai/rate-limits', async (req, res) => {
