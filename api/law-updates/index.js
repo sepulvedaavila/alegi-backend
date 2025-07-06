@@ -171,7 +171,7 @@ async function notifyAffectedUsers(updates) {
   console.log('Would notify users about law updates:', updates.length);
 }
 
-// Background job to fetch law updates
+// Background job to fetch law updates (optimized for cost)
 async function fetchLawUpdates() {
   try {
     // Fetch from multiple sources
@@ -188,24 +188,61 @@ async function fetchLawUpdates() {
       ...apiUpdates
     ]);
     
-    // Analyze impact with AI
+    // Store updates with flag for on-demand AI analysis
     for (const update of allUpdates) {
-      const impact = await analyzeLawUpdateImpact(update);
-      update.impact = impact.level;
-      update.summary = impact.summary;
-      update.affected_case_types = impact.affectedCaseTypes;
+      update.needs_ai_analysis = true; // Flag for on-demand analysis
     }
     
-    // Store in database
     await supabase
       .from('law_updates')
       .upsert(allUpdates, { onConflict: 'source_url' });
     
-    // Notify affected users
-    await notifyAffectedUsers(allUpdates);
+    console.log(`Stored ${allUpdates.length} law updates (pending AI analysis)`);
     
   } catch (error) {
     console.error('Law update fetch failed:', error);
+  }
+}
+
+// On-demand AI analysis for law updates
+async function analyzePendingUpdates() {
+  try {
+    // Get updates that need AI analysis
+    const { data: pendingUpdates, error } = await supabase
+      .from('law_updates')
+      .select('*')
+      .eq('needs_ai_analysis', true)
+      .limit(10); // Process in batches to control costs
+    
+    if (error) throw error;
+    
+    console.log(`Analyzing ${pendingUpdates.length} pending updates...`);
+    
+    for (const update of pendingUpdates) {
+      try {
+        const impact = await analyzeLawUpdateImpact(update);
+        update.impact = impact.level;
+        update.summary = impact.summary;
+        update.affected_case_types = impact.affectedCaseTypes;
+        update.needs_ai_analysis = false;
+        update.analyzed_at = new Date().toISOString();
+        
+        await supabase
+          .from('law_updates')
+          .update(update)
+          .eq('id', update.id);
+          
+      } catch (error) {
+        console.error(`Error analyzing update ${update.id}:`, error);
+        // Continue with other updates
+      }
+    }
+    
+    return { success: true, analyzed: pendingUpdates.length };
+    
+  } catch (error) {
+    console.error('Error analyzing pending updates:', error);
+    return { success: false, error: error.message };
   }
 }
 
@@ -218,8 +255,14 @@ module.exports = async (req, res) => {
       impact,
       since,
       page = 1,
-      limit = 20
+      limit = 20,
+      analyze = false // New parameter to trigger AI analysis
     } = req.query;
+    
+    // Trigger AI analysis if requested (cost optimization)
+    if (analyze === 'true') {
+      await analyzePendingUpdates();
+    }
     
     // Build query
     let query = supabase
@@ -264,6 +307,10 @@ module.exports = async (req, res) => {
         jurisdiction,
         impact,
         since
+      },
+      costOptimization: {
+        aiAnalysisTriggered: analyze === 'true',
+        pendingAnalysis: await getPendingAnalysisCount()
       }
     });
     
@@ -273,6 +320,22 @@ module.exports = async (req, res) => {
     });
   }
 };
+
+// Helper function to get pending analysis count
+async function getPendingAnalysisCount() {
+  try {
+    const { count, error } = await supabase
+      .from('law_updates')
+      .select('*', { count: 'exact', head: true })
+      .eq('needs_ai_analysis', true);
+    
+    if (error) throw error;
+    return count || 0;
+  } catch (error) {
+    console.error('Error getting pending analysis count:', error);
+    return 0;
+  }
+}
 
 // Schedule updates (this would be handled by Vercel cron jobs)
 // setInterval(fetchLawUpdates, 6 * 60 * 60 * 1000); // Every 6 hours 

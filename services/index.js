@@ -20,6 +20,7 @@ module.exports = {
     // New MVP feature services
     rateLimiter: require('./rateLimiter'),
     queueService: require('./queueService'),
+    costMonitor: require('./costMonitor.service'),
     
     // Re-export individual services for backwards compatibility
     SupabaseService: require('./supabase.service'),
@@ -34,5 +35,6 @@ module.exports = {
     RealtimeService: require('./realtime.service'),
     NotificationService: require('./notification.service'),
     RateLimiter: require('./rateLimiter'),
-    QueueService: require('./queueService')
+    QueueService: require('./queueService'),
+    CostMonitor: require('./costMonitor.service')
   };
