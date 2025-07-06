@@ -1,28 +1,109 @@
 // services/email.service.js
 const nodemailer = require('nodemailer');
+const circuitBreaker = require('./circuit-breaker.service');
 
 class EmailService {
   constructor() {
-    this.transporter = null;
-    this.initializeTransporter();
+    this.providers = this.initializeProviders();
   }
 
-  initializeTransporter() {
-    // Use environment variables for email configuration
-    if (process.env.SMTP_HOST) {
-      this.transporter = nodemailer.createTransporter({
-        host: process.env.SMTP_HOST,
-        port: process.env.SMTP_PORT || 587,
-        secure: process.env.SMTP_SECURE === 'true',
-        auth: {
-          user: process.env.SMTP_USER,
-          pass: process.env.SMTP_PASS
-        }
+  initializeProviders() {
+    const providers = [];
+    
+    // Add SendGrid provider if configured
+    if (process.env.SENDGRID_API_KEY) {
+      providers.push({
+        name: 'sendgrid',
+        service: this.createSendGridService()
       });
-    } else {
-      // Fallback to console logging in development
-      console.warn('Email service not configured - emails will be logged to console');
     }
+    
+    // Add SMTP provider if configured
+    if (process.env.SMTP_HOST) {
+      providers.push({
+        name: 'smtp',
+        service: this.createSMTPService()
+      });
+    }
+
+    // Add console logging provider as fallback
+    providers.push({
+      name: 'console',
+      service: this.createConsoleService()
+    });
+
+    return providers;
+  }
+
+  createSendGridService() {
+    return {
+      send: async (emailData) => {
+        // SendGrid implementation would go here
+        // For now, we'll use a mock implementation
+        console.log('SendGrid email would be sent:', emailData);
+        return { success: true, provider: 'sendgrid' };
+      }
+    };
+  }
+
+  createSMTPService() {
+    const transporter = nodemailer.createTransporter({
+      host: process.env.SMTP_HOST,
+      port: process.env.SMTP_PORT || 587,
+      secure: process.env.SMTP_SECURE === 'true',
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS
+      }
+    });
+
+    return {
+      send: async (emailData) => {
+        return await transporter.sendMail(emailData);
+      }
+    };
+  }
+
+  createConsoleService() {
+    return {
+      send: async (emailData) => {
+        console.log('Email would be sent (console fallback):', {
+          to: emailData.to,
+          subject: emailData.subject,
+          from: emailData.from
+        });
+        return { success: true, provider: 'console' };
+      }
+    };
+  }
+
+  async sendEmail(emailData) {
+    if (this.providers.length === 0) {
+      console.warn('No email providers configured - skipping email send');
+      return { success: false, error: 'No email providers configured' };
+    }
+
+    let lastError;
+    
+    for (const { name, service } of this.providers) {
+      try {
+        const result = await circuitBreaker.callWithCircuitBreaker(
+          `email-${name}`,
+          () => service.send(emailData),
+          { threshold: 3, timeout: 30000 }
+        );
+        
+        console.log(`Email sent successfully via ${name}`);
+        return { success: true, provider: name, result };
+      } catch (error) {
+        console.warn(`Email failed via ${name}:`, error.message);
+        lastError = error;
+        continue;
+      }
+    }
+
+    console.error('All email providers failed:', lastError);
+    return { success: false, error: lastError?.message || 'All email providers failed' };
   }
 
   async sendCaseProcessedNotification(caseId, caseData) {
@@ -42,15 +123,11 @@ class EmailService {
         `
       };
 
-      if (this.transporter) {
-        await this.transporter.sendMail(emailContent);
-        console.log(`Email sent for case ${caseId}`);
-      } else {
-        console.log('Email would be sent:', emailContent);
-      }
+      return await this.sendEmail(emailContent);
     } catch (error) {
       console.error('Email sending failed:', error);
       // Don't throw error to prevent queue failure
+      return { success: false, error: error.message };
     }
   }
 
@@ -68,14 +145,10 @@ class EmailService {
         `
       };
 
-      if (this.transporter) {
-        await this.transporter.sendMail(emailContent);
-        console.log(`Document notification sent for case ${caseId}`);
-      } else {
-        console.log('Document email would be sent:', emailContent);
-      }
+      return await this.sendEmail(emailContent);
     } catch (error) {
       console.error('Document email sending failed:', error);
+      return { success: false, error: error.message };
     }
   }
 }

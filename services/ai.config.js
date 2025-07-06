@@ -3,23 +3,56 @@
 // Based on OpenAI's rate limits: https://platform.openai.com/docs/guides/rate-limits
 
 module.exports = {
-  // RPM (Requests Per Minute) - conservative limits
-  // These are set conservatively to avoid hitting OpenAI's actual limits
+  // Production environment limits (optimized for production)
+  production: {
+    rpm: {
+      'gpt-4-turbo-preview': process.env.OPENAI_RPM_GPT4 || 40,
+      'gpt-4-0125-preview': process.env.OPENAI_RPM_GPT4 || 40,
+      'gpt-4-1106-preview': process.env.OPENAI_RPM_GPT4 || 40,
+      'gpt-3.5-turbo': process.env.OPENAI_RPM_GPT35 || 60,
+      'default': process.env.OPENAI_RPM_DEFAULT || 50
+    },
+    tpm: {
+      'gpt-4-turbo-preview': process.env.OPENAI_TPM_GPT4 || 120000,
+      'gpt-4-0125-preview': process.env.OPENAI_TPM_GPT4 || 120000,
+      'gpt-4-1106-preview': process.env.OPENAI_TPM_GPT4 || 120000,
+      'gpt-3.5-turbo': process.env.OPENAI_TPM_GPT35 || 180000,
+      'default': process.env.OPENAI_TPM_DEFAULT || 150000
+    }
+  },
+  
+  // Development environment limits (more conservative)
+  development: {
+    rpm: {
+      'gpt-4-turbo-preview': process.env.OPENAI_RPM_GPT4 || 15,
+      'gpt-4-0125-preview': process.env.OPENAI_RPM_GPT4 || 15,
+      'gpt-4-1106-preview': process.env.OPENAI_RPM_GPT4 || 15,
+      'gpt-3.5-turbo': process.env.OPENAI_RPM_GPT35 || 25,
+      'default': process.env.OPENAI_RPM_DEFAULT || 20
+    },
+    tpm: {
+      'gpt-4-turbo-preview': process.env.OPENAI_TPM_GPT4 || 40000,
+      'gpt-4-0125-preview': process.env.OPENAI_TPM_GPT4 || 40000,
+      'gpt-4-1106-preview': process.env.OPENAI_TPM_GPT4 || 40000,
+      'gpt-3.5-turbo': process.env.OPENAI_TPM_GPT35 || 80000,
+      'default': process.env.OPENAI_TPM_DEFAULT || 60000
+    }
+  },
+  
+  // Legacy configuration for backward compatibility
   rpm: {
-    'gpt-4-turbo-preview': process.env.OPENAI_RPM_GPT4 || 10, // Conservative limit for GPT-4
+    'gpt-4-turbo-preview': process.env.OPENAI_RPM_GPT4 || 10,
     'gpt-4-0125-preview': process.env.OPENAI_RPM_GPT4 || 10,
     'gpt-4-1106-preview': process.env.OPENAI_RPM_GPT4 || 10,
-    'gpt-3.5-turbo': process.env.OPENAI_RPM_GPT35 || 20, // Higher limit for GPT-3.5
+    'gpt-3.5-turbo': process.env.OPENAI_RPM_GPT35 || 20,
     'default': process.env.OPENAI_RPM_DEFAULT || 15
   },
   
-  // TPM (Tokens Per Minute) - conservative limits
-  // These are set conservatively to avoid hitting OpenAI's actual limits
   tpm: {
-    'gpt-4-turbo-preview': process.env.OPENAI_TPM_GPT4 || 150000, // 150k tokens per minute
+    'gpt-4-turbo-preview': process.env.OPENAI_TPM_GPT4 || 150000,
     'gpt-4-0125-preview': process.env.OPENAI_TPM_GPT4 || 150000,
     'gpt-4-1106-preview': process.env.OPENAI_TPM_GPT4 || 150000,
-    'gpt-3.5-turbo': process.env.OPENAI_TPM_GPT35 || 90000, // 90k tokens per minute
+    'gpt-3.5-turbo': process.env.OPENAI_TPM_GPT35 || 90000,
     'default': process.env.OPENAI_TPM_DEFAULT || 100000
   },
   
@@ -42,38 +75,17 @@ module.exports = {
   getLimitsForEnvironment() {
     const env = process.env.NODE_ENV || 'development';
     
-    if (env === 'development') {
-      // More conservative limits in development
-      return {
-        rpm: {
-          'gpt-4-turbo-preview': 5,
-          'gpt-4-0125-preview': 5,
-          'gpt-4-1106-preview': 5,
-          'gpt-3.5-turbo': 10,
-          'default': 8
-        },
-        tpm: {
-          'gpt-4-turbo-preview': 75000,
-          'gpt-4-0125-preview': 75000,
-          'gpt-4-1106-preview': 75000,
-          'gpt-3.5-turbo': 45000,
-          'default': 50000
-        }
-      };
-    }
-    
     if (env === 'production') {
-      // Production limits (can be higher)
       return {
-        rpm: this.rpm,
-        tpm: this.tpm
+        rpm: this.production.rpm,
+        tpm: this.production.tpm
       };
     }
     
-    // Default to conservative limits
+    // Development and other environments
     return {
-      rpm: this.rpm,
-      tpm: this.tpm
+      rpm: this.development.rpm,
+      tpm: this.development.tpm
     };
   }
 }; 

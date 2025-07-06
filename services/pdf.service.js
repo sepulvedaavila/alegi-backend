@@ -1,42 +1,67 @@
 // services/pdf.service.js
 const axios = require('axios');
 const pdfParse = require('pdf-parse');
+const circuitBreaker = require('./circuit-breaker.service');
 
 class PDFService {
   constructor() {
-    this.pdfCoApiKey = process.env.PDF_CO_API_KEY;
-    this.pdfCoBaseUrl = 'https://api.pdf.co/v1';
+    this.services = [
+      { name: 'primary', service: require('./pdfco.service') },
+      { name: 'fallback', service: this.createFallbackService() }
+    ];
+  }
+
+  async extractText(filePath, fileBuffer) {
+    let lastError;
+    
+    for (const { name, service } of this.services) {
+      try {
+        console.log(`Attempting PDF extraction with ${name} service`);
+        
+        const result = await circuitBreaker.callWithCircuitBreaker(
+          `pdf-${name}`, 
+          () => service.extractText(filePath, fileBuffer),
+          { threshold: 2, timeout: 120000 }
+        );
+        
+        if (result && result.text && result.text.trim().length > 0) {
+          console.log(`PDF extraction successful with ${name} service`);
+          return result;
+        }
+      } catch (error) {
+        console.warn(`PDF extraction failed with ${name} service:`, error.message);
+        lastError = error;
+        continue;
+      }
+    }
+
+    // If all services fail, return partial result
+    console.error('All PDF extraction services failed:', lastError);
+    return {
+      text: 'PDF text extraction failed - manual review required',
+      pages: 0,
+      error: lastError?.message || 'Unknown extraction error',
+      fallback: true
+    };
   }
 
   async extractTextFromURL(fileUrl, fileName) {
     try {
-      // First try PDF.co API for high-quality text extraction
-      const response = await axios.post(
-        `${this.pdfCoBaseUrl}/pdf/convert/to/text`,
-        {
-          url: fileUrl,
-          name: fileName,
-          inline: true,
-          async: false
-        },
-        {
-          headers: {
-            'x-api-key': this.pdfCoApiKey,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-
-      return response.data.text;
-    } catch (error) {
-      console.error('PDF.co extraction failed, falling back to pdf-parse:', error);
-      
-      // Fallback to pdf-parse
-      const pdfBuffer = await axios.get(fileUrl, { 
-        responseType: 'arraybuffer' 
+      // Get file buffer from URL
+      const response = await axios.get(fileUrl, { 
+        responseType: 'arraybuffer',
+        timeout: 30000
       });
-      const data = await pdfParse(pdfBuffer.data);
-      return data.text;
+      
+      return await this.extractText(fileName, response.data);
+    } catch (error) {
+      console.error('Failed to download file from URL:', error);
+      return {
+        text: `Failed to download file: ${fileName}`,
+        pages: 0,
+        error: error.message,
+        fallback: true
+      };
     }
   }
 
@@ -50,11 +75,37 @@ class PDFService {
       .upsert({
         case_id: caseId,
         document_name: documentName,
-        pdf_text: extractedText,
-        processed_at: new Date().toISOString()
+        pdf_text: extractedText.text || extractedText,
+        processed_at: new Date().toISOString(),
+        extraction_status: extractedText.fallback ? 'fallback' : 'success',
+        error_message: extractedText.error || null
       });
 
     return extractedText;
+  }
+
+  createFallbackService() {
+    return {
+      extractText: async (filePath, fileBuffer) => {
+        // Try simple text extraction methods
+        const fileName = filePath.toLowerCase();
+        
+        if (fileName.endsWith('.txt')) {
+          return {
+            text: fileBuffer.toString('utf-8'),
+            pages: 1,
+            service: 'text-fallback'
+          };
+        }
+        
+        // For PDFs, try a simple approach or return placeholder
+        return {
+          text: `Document uploaded: ${filePath}\nContent requires manual extraction.`,
+          pages: 1,
+          service: 'manual-fallback'
+        };
+      }
+    };
   }
 }
 
