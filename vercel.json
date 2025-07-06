@@ -55,6 +55,14 @@
     "api/health.js": {
       "maxDuration": 10,
       "memory": 256
+    },
+    "api/cron/law-updates.js": {
+      "maxDuration": 300,
+      "memory": 1024
+    },
+    "api/cron/metadata-update.js": {
+      "maxDuration": 300,
+      "memory": 1024
     }
   },
   "crons": [
@@ -77,15 +85,15 @@
       "destination": "/api/index.js"
     },
     {
-      "source": "/api/cases/:caseId/status",
+      "source": "/api/cases/:id/status",
       "destination": "/api/index.js"
     },
     {
-      "source": "/api/cases/:caseId/updates",
+      "source": "/api/cases/:id/updates",
       "destination": "/api/index.js"
     },
     {
-      "source": "/api/cases/:caseId/enhanced-status",
+      "source": "/api/cases/:id/enhanced-status",
       "destination": "/api/index.js"
     },
     {
