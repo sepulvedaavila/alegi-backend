@@ -7,12 +7,70 @@
     },
     "api/monitoring/stats.js": {
       "maxDuration": 10
+    },
+    "api/cases/[id]/probability.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/cases/[id]/settlement-analysis.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/cases/[id]/precedents.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/cases/[id]/judge-trends.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/cases/[id]/risk-assessment.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/cases/[id]/cost-estimate.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/cases/[id]/financial-prediction.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/cases/[id]/timeline-estimate.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/cases/[id]/find-similar.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/analytics/case-coverage.js": {
+      "maxDuration": 30,
+      "memory": 512
+    },
+    "api/law-updates/index.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/health.js": {
+      "maxDuration": 10,
+      "memory": 256
     }
   },
+  "crons": [
+    {
+      "path": "/api/cron/law-updates",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/metadata-update",
+      "schedule": "0 0 * * *"
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/health",
-      "destination": "/api/index.js"
+      "destination": "/api/health.js"
     },
     {
       "source": "/api/realtime/stats",
@@ -33,6 +91,50 @@
     {
       "source": "/api/cases/status",
       "destination": "/api/index.js"
+    },
+    {
+      "source": "/api/cases/:id/probability",
+      "destination": "/api/cases/[id]/probability.js"
+    },
+    {
+      "source": "/api/cases/:id/settlement-analysis",
+      "destination": "/api/cases/[id]/settlement-analysis.js"
+    },
+    {
+      "source": "/api/cases/:id/precedents",
+      "destination": "/api/cases/[id]/precedents.js"
+    },
+    {
+      "source": "/api/cases/:id/judge-trends",
+      "destination": "/api/cases/[id]/judge-trends.js"
+    },
+    {
+      "source": "/api/cases/:id/risk-assessment",
+      "destination": "/api/cases/[id]/risk-assessment.js"
+    },
+    {
+      "source": "/api/cases/:id/cost-estimate",
+      "destination": "/api/cases/[id]/cost-estimate.js"
+    },
+    {
+      "source": "/api/cases/:id/financial-prediction",
+      "destination": "/api/cases/[id]/financial-prediction.js"
+    },
+    {
+      "source": "/api/cases/:id/timeline-estimate",
+      "destination": "/api/cases/[id]/timeline-estimate.js"
+    },
+    {
+      "source": "/api/cases/:id/find-similar",
+      "destination": "/api/cases/[id]/find-similar.js"
+    },
+    {
+      "source": "/api/analytics/case-coverage",
+      "destination": "/api/analytics/case-coverage.js"
+    },
+    {
+      "source": "/api/law-updates",
+      "destination": "/api/law-updates/index.js"
     },
     {
       "source": "/api/(.*)",

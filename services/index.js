@@ -17,6 +17,10 @@ module.exports = {
     realtimeService: require('./realtime.service'),
     notificationService: require('./notification.service'),
     
+    // New MVP feature services
+    rateLimiter: require('./rateLimiter'),
+    queueService: require('./queueService'),
+    
     // Re-export individual services for backwards compatibility
     SupabaseService: require('./supabase.service'),
     ErrorTrackingService: require('./error-tracking.service'),
@@ -28,5 +32,7 @@ module.exports = {
     InternalAuthService: require('./internal-auth.service'),
     AIPrompts: require('./ai-prompts.service'),
     RealtimeService: require('./realtime.service'),
-    NotificationService: require('./notification.service')
+    NotificationService: require('./notification.service'),
+    RateLimiter: require('./rateLimiter'),
+    QueueService: require('./queueService')
   };
