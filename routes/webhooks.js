@@ -81,22 +81,53 @@ router.post('/supabase/case-created', verifySupabaseWebhook, async (req, res) =>
   }
 });
 
-// Document upload webhook (for future use)
+// Document upload webhook with enhanced processing support
 router.post('/supabase/document-uploaded', verifySupabaseWebhook, async (req, res) => {
   try {
     const { record } = req.body;
     
-    // Add to document processing queue
-    await queueService.add('document-processing', {
+    console.log('Document uploaded:', {
       documentId: record.id,
       caseId: record.case_id,
-      filePath: record.file_path,
-      webhookType: 'new_document'
+      fileName: record.file_name
     });
     
-    res.json({ success: true, message: 'Document processing initiated' });
+    // Check if case is using enhanced processing
+    const { data: caseData } = await supabase
+      .from('case_briefs')
+      .select('processing_type, enhanced_processing_status')
+      .eq('id', record.case_id)
+      .single();
+    
+    if (caseData?.processing_type === 'enhanced') {
+      // For enhanced processing, trigger document extraction
+      await queueService.add('document-extraction', {
+        caseId: record.case_id,
+        documentId: record.id,
+        filePath: record.file_path,
+        webhookType: 'new_document'
+      });
+      
+      console.log(`Enhanced document extraction queued for document ${record.id}`);
+    } else {
+      // Legacy document processing
+      await queueService.add('document-processing', {
+        documentId: record.id,
+        caseId: record.case_id,
+        filePath: record.file_path,
+        webhookType: 'new_document'
+      });
+      
+      console.log(`Legacy document processing queued for document ${record.id}`);
+    }
+    
+    res.json({ 
+      success: true, 
+      message: 'Document processing initiated',
+      processingType: caseData?.processing_type || 'standard'
+    });
   } catch (error) {
-    console.error('Webhook error:', error);
+    console.error('Document webhook error:', error);
     res.status(500).json({ error: 'Processing failed' });
   }
 });
@@ -143,8 +174,11 @@ router.post('/universal', async (req, res) => {
     } else if (table === 'case_documents' && type === 'INSERT') {
       return handleNewDocument(record, res);
     } else if (table === 'case_briefs' && (type === 'INSERT' || type === 'UPDATE')) {
-      // Legacy queue processing for backward compatibility
-      await queueService.add('case-processing', {
+      // Enhanced queue processing with fallback to legacy
+      const processingType = record.processing_type || 'enhanced';
+      const queueName = processingType === 'enhanced' ? 'enhanced-case-processing' : 'case-processing';
+      
+      await queueService.add(queueName, {
         caseId: record.id,
         userId: record.user_id,
         caseData: record,
@@ -154,8 +188,9 @@ router.post('/universal', async (req, res) => {
       
       res.json({ 
         success: true, 
-        message: `Case ${type.toLowerCase()} processing initiated`,
+        message: `Case ${processingType} processing initiated`,
         caseId: record.id,
+        processingType: processingType,
         source: webhookSource
       });
     } else {
@@ -176,17 +211,23 @@ async function handleNewCaseBrief(caseBrief, res) {
   try {
     console.log('Queuing new case brief for processing:', caseBrief.id);
 
+    // Determine processing type based on case configuration or default to enhanced
+    const processingType = caseBrief.processing_type || 'enhanced';
+    const queueName = processingType === 'enhanced' ? 'enhanced-case-processing' : 'case-processing';
+    
     // Update status to processing
     await supabase
       .from('case_briefs')
       .update({ 
         processing_status: 'processing',
+        processing_type: processingType,
+        enhanced_processing_status: processingType === 'enhanced' ? 'document_extraction' : null,
         last_ai_update: new Date().toISOString()
       })
       .eq('id', caseBrief.id);
 
-    // Add to case processing queue instead of direct processing
-    await queueService.add('case-processing', {
+    // Add to appropriate processing queue
+    await queueService.add(queueName, {
       caseId: caseBrief.id,
       userId: caseBrief.user_id,
       caseData: caseBrief,
@@ -194,11 +235,12 @@ async function handleNewCaseBrief(caseBrief, res) {
       source: 'webhook'
     });
 
-    console.log('Successfully queued case brief for processing:', caseBrief.id);
+    console.log(`Successfully queued case brief for ${processingType} processing:`, caseBrief.id);
     return res.status(200).json({ 
       success: true, 
       caseId: caseBrief.id,
-      message: 'Case processed successfully'
+      processingType: processingType,
+      message: `Case ${processingType} processing initiated successfully`
     });
 
   } catch (error) {
@@ -217,6 +259,7 @@ async function handleNewCaseBrief(caseBrief, res) {
       .from('case_briefs')
       .update({ 
         processing_status: 'failed',
+        enhanced_processing_status: 'failed',
         last_ai_update: new Date().toISOString()
       })
       .eq('id', caseBrief.id);
@@ -229,10 +272,56 @@ async function handleNewCaseBrief(caseBrief, res) {
 }
 
 async function handleNewDocument(document, res) {
-  // Handle document upload events if needed
-  console.log('New document uploaded:', document.id);
-  // You can trigger reprocessing of the case here if needed
-  return res.status(200).json({ success: true });
+  try {
+    console.log('New document uploaded:', document.id);
+    
+    // Check if case is using enhanced processing
+    const { data: caseData } = await supabase
+      .from('case_briefs')
+      .select('processing_type, enhanced_processing_status')
+      .eq('id', document.case_id)
+      .single();
+    
+    if (caseData?.processing_type === 'enhanced') {
+      // For enhanced processing, trigger document extraction
+      await queueService.add('document-extraction', {
+        caseId: document.case_id,
+        documentId: document.id,
+        filePath: document.file_path,
+        webhookType: 'new_document'
+      });
+      
+      console.log(`Enhanced document extraction queued for document ${document.id}`);
+      
+      return res.status(200).json({ 
+        success: true, 
+        message: 'Enhanced document processing initiated',
+        processingType: 'enhanced'
+      });
+    } else {
+      // Legacy document processing
+      await queueService.add('document-processing', {
+        documentId: document.id,
+        caseId: document.case_id,
+        filePath: document.file_path,
+        webhookType: 'new_document'
+      });
+      
+      console.log(`Legacy document processing queued for document ${document.id}`);
+      
+      return res.status(200).json({ 
+        success: true, 
+        message: 'Document processing initiated',
+        processingType: 'standard'
+      });
+    }
+  } catch (error) {
+    console.error('Document processing error:', error);
+    return res.status(500).json({ 
+      error: error.message,
+      documentId: document.id 
+    });
+  }
 }
 
 module.exports = router;

@@ -202,6 +202,81 @@ class NotificationService {
     };
   }
 
+  // Enhanced processing notifications
+  async notifyEnhancedProcessingStarted(caseId, userId, caseData) {
+    try {
+      console.log(`Notifying enhanced processing started for case ${caseId}`);
+
+      // Update database status
+      await supabaseService.client
+        .from('case_briefs')
+        .update({ 
+          enhanced_processing_status: 'document_extraction',
+          last_ai_update: new Date().toISOString()
+        })
+        .eq('id', caseId);
+
+      // Send real-time notification if available
+      if (this.realtimeService) {
+        this.realtimeService.notifyEnhancedProcessingStarted(caseId, userId, caseData);
+      }
+
+      console.log(`Notified enhanced processing started for case ${caseId}`);
+    } catch (notifyError) {
+      console.error('Failed to notify enhanced processing started:', notifyError);
+    }
+  }
+
+  async notifyEnhancedProcessingCompleted(caseId, userId, caseData, results) {
+    try {
+      console.log(`Notifying enhanced processing completed for case ${caseId}`);
+
+      // Update database status
+      await supabaseService.client
+        .from('case_briefs')
+        .update({ 
+          enhanced_processing_status: 'completed',
+          processing_status: 'complete',
+          last_ai_update: new Date().toISOString()
+        })
+        .eq('id', caseId);
+
+      // Send real-time notification if available
+      if (this.realtimeService) {
+        this.realtimeService.notifyEnhancedProcessingCompleted(caseId, userId, caseData, results);
+      }
+
+      console.log(`Notified enhanced processing completed for case ${caseId}`);
+    } catch (notifyError) {
+      console.error('Failed to notify enhanced processing completed:', notifyError);
+    }
+  }
+
+  async notifyEnhancedProcessingFailed(caseId, userId, caseData, error) {
+    try {
+      console.log(`Notifying enhanced processing failed for case ${caseId}`);
+
+      // Update database status
+      await supabaseService.client
+        .from('case_briefs')
+        .update({ 
+          enhanced_processing_status: 'failed',
+          processing_status: 'failed',
+          last_ai_update: new Date().toISOString()
+        })
+        .eq('id', caseId);
+
+      // Send real-time notification if available
+      if (this.realtimeService) {
+        this.realtimeService.notifyEnhancedProcessingFailed(caseId, userId, caseData, error);
+      }
+
+      console.log(`Notified enhanced processing failed for case ${caseId}`);
+    } catch (notifyError) {
+      console.error('Failed to notify enhanced processing failed:', notifyError);
+    }
+  }
+
   // Get enhanced case status with processing details
   async getEnhancedCaseStatus(caseId, userId) {
     try {
@@ -236,7 +311,9 @@ class NotificationService {
           updated_at,
           ai_processed,
           processing_started_at,
-          processing_completed_at
+          processing_completed_at,
+          processing_type,
+          enhanced_processing_status
         `)
         .eq('id', caseId)
         .single();
@@ -261,6 +338,8 @@ class NotificationService {
         aiProcessed: caseData.ai_processed || false,
         processingStartedAt: caseData.processing_started_at,
         processingCompletedAt: caseData.processing_completed_at,
+        processingType: caseData.processing_type || 'standard',
+        enhancedProcessingStatus: caseData.enhanced_processing_status || 'not_started',
         timestamp: new Date().toISOString()
       };
     } catch (error) {
