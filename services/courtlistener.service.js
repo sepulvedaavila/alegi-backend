@@ -1,11 +1,12 @@
 const axios = require('axios');
 const Sentry = require('@sentry/node');
 const circuitBreaker = require('./circuit-breaker.service');
+const { mapToCourtListenerCourt } = require('../utils/courtMaps');
 
 class CourtListenerService {
   constructor() {
     this.apiKey = process.env.COURTLISTENER_API_KEY;
-    this.baseURL = process.env.COURTLISTENER_BASE_URL || 'https://www.courtlistener.com/api/rest/v3/';
+    this.baseURL = process.env.COURTLISTENER_BASE_URL || 'https://www.courtlistener.com/api/rest/v4/';
     this.rateLimiter = {
       lastCall: 0,
       minInterval: 1000 // 1 second between calls
@@ -139,6 +140,14 @@ class CourtListenerService {
         order_by: 'score desc',
         page_size: 10
       };
+
+      // Use centralized court mapping
+      if (caseData.jurisdiction) {
+        const courtCodes = mapToCourtListenerCourt(caseData.jurisdiction);
+        if (courtCodes) {
+          searchParams.court = courtCodes;
+        }
+      }
 
       const results = await this.makeAPICall('search/', searchParams);
       return this.processSimilarCases(results);

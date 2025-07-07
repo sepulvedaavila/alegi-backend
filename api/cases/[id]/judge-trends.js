@@ -4,6 +4,7 @@ const { createClient } = require('@supabase/supabase-js');
 const rateLimiter = require('../../../services/rateLimiter');
 const { handleError } = require('../../../utils/errorHandler');
 const courtListenerService = require('../../../services/courtlistener.service');
+const { mapToCourtListenerCourt } = require('../../../utils/courtMaps');
 
 // Initialize services
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -35,14 +36,8 @@ function getDateYearsAgo(years) {
 }
 
 function deriveCourtFromJurisdiction(jurisdiction) {
-  const courtMap = {
-    'federal': 'federal',
-    'california': 'ca9',
-    'new-york': 'ca2',
-    'texas': 'ca5'
-  };
-  
-  return courtMap[jurisdiction?.toLowerCase()] || 'federal';
+  // Using centralized court mapping from utils/courtMaps.js
+  return mapToCourtListenerCourt(jurisdiction) || 'federal';
 }
 
 async function getJudgeAppointmentInfo(judgeName) {

@@ -4,6 +4,7 @@ const { createClient } = require('@supabase/supabase-js');
 const rateLimiter = require('../../../services/rateLimiter');
 const { handleError } = require('../../../utils/errorHandler');
 const courtListenerService = require('../../../services/courtlistener.service');
+const { mapToCourtListenerCourt } = require('../../../utils/courtMaps');
 
 // Initialize services
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -45,17 +46,7 @@ function getRelevantDateRange(caseData) {
   return fiveYearsAgo.toISOString().split('T')[0];
 }
 
-function mapToCourtListenerCourt(jurisdiction) {
-  // Simple mapping - could be enhanced
-  const courtMap = {
-    'federal': 'ca1,ca2,ca3,ca4,ca5,ca6,ca7,ca8,ca9,ca10,ca11,cadc,cafc,cavet',
-    'california': 'ca9',
-    'new-york': 'ca2',
-    'texas': 'ca5'
-  };
-  
-  return courtMap[jurisdiction?.toLowerCase()] || '';
-}
+// Using centralized court mapping from utils/courtMaps.js
 
 async function storePrecedents(caseId, precedents) {
   try {
