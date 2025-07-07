@@ -5,6 +5,7 @@ const aiService = require('./ai.service');
 const pdfcoService = require('./pdfco.service');
 const courtListenerService = require('./courtlistener.service');
 const errorTrackingService = require('./error-tracking.service');
+const internalAPIService = require('./internal-api.service');
 
 class ProcessingService {
   constructor() {
@@ -58,6 +59,21 @@ class ProcessingService {
       // Step 6: Update case stage if needed
       if (caseInfo.case_stage === 'Assessing filing') {
         await this.updateCaseStage(caseId, 'Analysis Complete');
+      }
+      
+      // Step 7: Trigger additional analysis endpoints
+      try {
+        console.log(`Triggering additional analysis for case ${caseId}`);
+        const analysisResults = await internalAPIService.triggerSequentialAnalysis(caseId, 3000); // 3 second delay
+        
+        if (analysisResults.errors.length > 0) {
+          console.warn(`Some analysis failed for case ${caseId}:`, analysisResults.errors);
+        }
+        
+        console.log(`Additional analysis completed for case ${caseId}`);
+      } catch (error) {
+        console.error(`Failed to trigger additional analysis for case ${caseId}:`, error);
+        // Don't fail the entire process if analysis fails
       }
       
       console.log(`Successfully processed case ${caseId}`);

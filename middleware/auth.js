@@ -48,9 +48,33 @@ const validateSupabaseToken = async (req) => {
   }
 };
 
+// New function for internal service authentication
+const validateInternalServiceCall = async (req) => {
+  // Check for internal service headers
+  const internalServiceHeader = req.headers['x-internal-service'];
+  const serviceSecret = req.headers['x-service-secret'];
+  
+  // Allow internal service calls if proper headers are present
+  if (internalServiceHeader === 'alegi-backend' && serviceSecret === process.env.INTERNAL_SERVICE_SECRET) {
+    // Create a mock user object for internal service calls
+    return {
+      id: 'internal-service',
+      email: 'service@alegi.io',
+      role: 'service_role',
+      app_metadata: {
+        provider: 'internal',
+        providers: ['internal']
+      }
+    };
+  }
+  
+  // If not an internal service call, fall back to regular token validation
+  return await validateSupabaseToken(req);
+};
+
 const authenticateJWT = async (req, res, next) => {
   try {
-    const user = await validateSupabaseToken(req);
+    const user = await validateInternalServiceCall(req);
     req.user = user;
     next();
   } catch (error) {
@@ -60,7 +84,7 @@ const authenticateJWT = async (req, res, next) => {
 
 const optionalAuth = async (req, res, next) => {
   try {
-    const user = await validateSupabaseToken(req);
+    const user = await validateInternalServiceCall(req);
     req.user = user;
   } catch (error) {
     // Don't fail, just don't set user
@@ -71,6 +95,7 @@ const optionalAuth = async (req, res, next) => {
 
 module.exports = {
   validateSupabaseToken,
+  validateInternalServiceCall,
   authenticateJWT,
   optionalAuth
 }; 
