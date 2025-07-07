@@ -6,6 +6,7 @@ const pdfcoService = require('./pdfco.service');
 const courtListenerService = require('./courtlistener.service');
 const errorTrackingService = require('./error-tracking.service');
 const internalAPIService = require('./internal-api.service');
+const queueService = require('./queue.service');
 
 class ProcessingService {
   constructor() {
@@ -390,6 +391,72 @@ class ProcessingService {
       if (now - timestamp > maxAge) {
         this.processingJobs.delete(key);
       }
+    }
+  }
+
+  /**
+   * Trigger analysis for existing cases that might not have been processed
+   * This is called when the frontend tries to access case data but it's not available
+   * @param {string} caseId - Case ID
+   * @param {string} userId - User ID
+   * @returns {Promise<Object>} Processing result
+   */
+  async triggerAnalysisForExistingCase(caseId, userId) {
+    try {
+      console.log(`Triggering analysis for existing case ${caseId}`);
+      
+      // Check if case exists and belongs to user
+      const caseInfo = await supabaseService.getCaseById(caseId);
+      if (!caseInfo || caseInfo.user_id !== userId) {
+        throw new Error('Case not found or access denied');
+      }
+      
+      // Check if case has already been processed
+      const { data: existingEnrichment } = await supabaseService.client
+        .from('case_ai_enrichment')
+        .select('*')
+        .eq('case_id', caseId)
+        .single();
+      
+      if (existingEnrichment) {
+        console.log(`Case ${caseId} already has enrichment data`);
+        return { success: true, alreadyProcessed: true };
+      }
+      
+      // Check if case has predictions
+      const { data: existingPredictions } = await supabaseService.client
+        .from('case_predictions')
+        .select('*')
+        .eq('case_id', caseId)
+        .single();
+      
+      if (existingPredictions) {
+        console.log(`Case ${caseId} already has predictions`);
+        return { success: true, alreadyProcessed: true };
+      }
+      
+      // If no analysis exists, trigger the full processing flow
+      console.log(`No analysis found for case ${caseId}, triggering full processing`);
+      
+      // Add to processing queue
+      await queueService.add('case-processing', {
+        caseId,
+        userId,
+        caseData: caseInfo,
+        webhookType: 'ANALYSIS_TRIGGER',
+        table: 'case_briefs',
+        source: 'frontend_request'
+      });
+      
+      return { 
+        success: true, 
+        message: 'Analysis triggered',
+        queued: true 
+      };
+      
+    } catch (error) {
+      console.error(`Error triggering analysis for case ${caseId}:`, error);
+      throw error;
     }
   }
 }

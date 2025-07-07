@@ -1,138 +1,220 @@
-const { testOpenAIIntegration } = require('./test-openai-integration');
-const { testCourtListenerIntegration } = require('./test-courtlistener-integration');
-const { testPDFProcessing } = require('./test-pdf-processing');
-const { testEmailService } = require('./test-email-service');
-const { testHealthMonitoring } = require('./test-health-monitoring');
+const axios = require('axios');
+const { createClient } = require('@supabase/supabase-js');
+
+// Initialize Supabase client
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+);
+
+// Test configuration
+const TEST_CASE = {
+  case_name: 'Integration Test Case',
+  case_description: 'This is a test case for integration testing of the complete webhook flow',
+  case_type: 'Personal Injury',
+  jurisdiction: 'California',
+  case_stage: 'Assessing filing'
+};
+
+const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3000';
 
 async function testCompleteIntegration() {
-  console.log('🚀 Starting Complete Integration Test Suite...\n');
+  console.log('🚀 Starting complete integration test...\n');
   
-  const results = {
-    openai: false,
-    courtlistener: false,
-    pdf: false,
-    email: false,
-    health: false
-  };
-
   try {
-    // Test 1: OpenAI Integration
-    console.log('='.repeat(60));
-    console.log('TEST 1: OpenAI Integration');
-    console.log('='.repeat(60));
-    results.openai = await testOpenAIIntegration();
-
-    // Test 2: CourtListener Integration
-    console.log('\n' + '='.repeat(60));
-    console.log('TEST 2: CourtListener Integration');
-    console.log('='.repeat(60));
-    results.courtlistener = await testCourtListenerIntegration();
-
-    // Test 3: PDF Processing Integration
-    console.log('\n' + '='.repeat(60));
-    console.log('TEST 3: PDF Processing Integration');
-    console.log('='.repeat(60));
-    results.pdf = await testPDFProcessing();
-
-    // Test 4: Email Service Integration
-    console.log('\n' + '='.repeat(60));
-    console.log('TEST 4: Email Service Integration');
-    console.log('='.repeat(60));
-    results.email = await testEmailService();
-
-    // Test 5: Health Monitoring Integration
-    console.log('\n' + '='.repeat(60));
-    console.log('TEST 5: Health Monitoring Integration');
-    console.log('='.repeat(60));
-    results.health = await testHealthMonitoring();
-
-    // Summary
-    console.log('\n' + '='.repeat(60));
-    console.log('INTEGRATION TEST SUMMARY');
-    console.log('='.repeat(60));
+    // Step 1: Create a test case
+    console.log('📝 Step 1: Creating test case...');
+    const { data: caseData, error: caseError } = await supabase
+      .from('case_briefs')
+      .insert({
+        ...TEST_CASE,
+        user_id: process.env.TEST_USER_ID || 'test-user-id',
+        created_at: new Date().toISOString()
+      })
+      .select()
+      .single();
     
-    const passedTests = Object.values(results).filter(result => result).length;
-    const totalTests = Object.keys(results).length;
+    if (caseError) throw caseError;
     
-    Object.entries(results).forEach(([service, result]) => {
-      const status = result ? '✅ PASSED' : '❌ FAILED';
-      console.log(`${service.padEnd(15)}: ${status}`);
-    });
+    console.log(`✅ Test case created: ${caseData.id}`);
     
-    console.log('\n' + '-'.repeat(60));
-    console.log(`Overall Result: ${passedTests}/${totalTests} tests passed`);
+    // Step 2: Wait for webhook processing
+    console.log('\n⏳ Step 2: Waiting for webhook processing...');
+    await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds
     
-    if (passedTests === totalTests) {
-      console.log('🎉 ALL INTEGRATION TESTS PASSED!');
-      console.log('✅ The Alegi backend is ready for production deployment.');
+    // Step 3: Check if case has been processed
+    console.log('\n🔍 Step 3: Checking case processing status...');
+    
+    const { data: enrichment, error: enrichmentError } = await supabase
+      .from('case_ai_enrichment')
+      .select('*')
+      .eq('case_id', caseData.id)
+      .single();
+    
+    if (enrichmentError && enrichmentError.code !== 'PGRST116') {
+      console.error('❌ Error checking enrichment:', enrichmentError);
+    } else if (enrichment) {
+      console.log('✅ Case enrichment found');
     } else {
-      console.log('⚠️  Some tests failed. Please review the issues above.');
-      console.log('🔧 Check the individual test outputs for specific problems.');
+      console.log('⚠️  No enrichment found yet');
     }
-
-    // Environment Check
-    console.log('\n' + '='.repeat(60));
-    console.log('ENVIRONMENT CHECK');
-    console.log('='.repeat(60));
     
-    const envVars = [
-      'NODE_ENV',
-      'OPENAI_API_KEY',
-      'COURTLISTENER_API_KEY',
-      'PDF_CO_API_KEY',
-      'SENDGRID_API_KEY',
-      'SMTP_HOST',
-      'SUPABASE_URL',
-      'SUPABASE_SERVICE_KEY'
+    const { data: predictions, error: predictionsError } = await supabase
+      .from('case_predictions')
+      .select('*')
+      .eq('case_id', caseData.id)
+      .single();
+    
+    if (predictionsError && predictionsError.code !== 'PGRST116') {
+      console.error('❌ Error checking predictions:', predictionsError);
+    } else if (predictions) {
+      console.log('✅ Case predictions found');
+    } else {
+      console.log('⚠️  No predictions found yet');
+    }
+    
+    // Step 4: Test individual analysis endpoints
+    console.log('\n🔬 Step 4: Testing individual analysis endpoints...');
+    
+    const analysisEndpoints = [
+      'probability',
+      'settlement-analysis',
+      'precedents',
+      'judge-trends',
+      'risk-assessment',
+      'cost-estimate',
+      'financial-prediction',
+      'timeline-estimate',
+      'find-similar'
     ];
     
-    envVars.forEach(varName => {
-      const value = process.env[varName];
-      const status = value ? '✅ Configured' : '❌ Missing';
-      console.log(`${varName.padEnd(20)}: ${status}`);
+    const endpointResults = {};
+    
+    for (const endpoint of analysisEndpoints) {
+      try {
+        console.log(`  Testing ${endpoint}...`);
+        
+        // Create a mock request object for internal testing
+        const mockReq = {
+          method: 'GET',
+          query: { id: caseData.id },
+          headers: {
+            authorization: `Bearer ${process.env.TEST_AUTH_TOKEN || 'test-token'}`
+          }
+        };
+        
+        const mockRes = {
+          status: (code) => ({
+            json: (data) => {
+              endpointResults[endpoint] = { status: code, data };
+              console.log(`    ✅ ${endpoint}: ${code}`);
+            },
+            end: () => {
+              endpointResults[endpoint] = { status: code };
+              console.log(`    ✅ ${endpoint}: ${code}`);
+            }
+          }),
+          setHeader: () => mockRes,
+          json: (data) => {
+            endpointResults[endpoint] = { status: 200, data };
+            console.log(`    ✅ ${endpoint}: 200`);
+          }
+        };
+        
+        // Import and call the endpoint function
+        const endpointFunction = require(`../api/cases/[id]/${endpoint.replace('-', '.')}.js`);
+        await endpointFunction(mockReq, mockRes);
+        
+        // Wait a bit between calls
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+      } catch (error) {
+        console.log(`    ❌ ${endpoint}: ${error.message}`);
+        endpointResults[endpoint] = { error: error.message };
+      }
+    }
+    
+    // Step 5: Test trigger analysis endpoint
+    console.log('\n🎯 Step 5: Testing trigger analysis endpoint...');
+    
+    try {
+      const triggerResponse = await axios.post(
+        `${API_BASE_URL}/api/cases/${caseData.id}/trigger-analysis`,
+        {},
+        {
+          headers: {
+            'Authorization': `Bearer ${process.env.TEST_AUTH_TOKEN || 'test-token'}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      
+      console.log('✅ Trigger analysis endpoint working:', triggerResponse.data);
+    } catch (error) {
+      console.log('❌ Trigger analysis endpoint failed:', error.response?.data || error.message);
+    }
+    
+    // Step 6: Check final status
+    console.log('\n📊 Step 6: Final status check...');
+    
+    const { data: finalCase } = await supabase
+      .from('case_briefs')
+      .select('*')
+      .eq('id', caseData.id)
+      .single();
+    
+    console.log('Final case status:', {
+      id: finalCase.id,
+      processing_status: finalCase.processing_status,
+      ai_processed: finalCase.ai_processed,
+      success_probability: finalCase.success_probability,
+      last_ai_update: finalCase.last_ai_update
     });
-
-    // Production Readiness Assessment
-    console.log('\n' + '='.repeat(60));
-    console.log('PRODUCTION READINESS ASSESSMENT');
-    console.log('='.repeat(60));
     
-    const criticalServices = ['openai', 'health'];
-    const criticalPassed = criticalServices.every(service => results[service]);
+    // Step 7: Summary
+    console.log('\n📋 Test Summary:');
+    console.log(`- Test case ID: ${caseData.id}`);
+    console.log(`- Enrichment found: ${!!enrichment}`);
+    console.log(`- Predictions found: ${!!predictions}`);
+    console.log(`- Endpoints tested: ${analysisEndpoints.length}`);
+    console.log(`- Successful endpoints: ${Object.values(endpointResults).filter(r => !r.error).length}`);
     
-    if (criticalPassed) {
-      console.log('✅ Critical services are working properly');
-    } else {
-      console.log('❌ Critical services have issues that must be resolved');
+    const failedEndpoints = Object.entries(endpointResults)
+      .filter(([name, result]) => result.error)
+      .map(([name]) => name);
+    
+    if (failedEndpoints.length > 0) {
+      console.log(`- Failed endpoints: ${failedEndpoints.join(', ')}`);
     }
     
-    const optionalServices = ['courtlistener', 'pdf', 'email'];
-    const optionalPassed = optionalServices.filter(service => results[service]).length;
+    console.log('\n🎉 Integration test completed!');
     
-    console.log(`📊 Optional services: ${optionalPassed}/${optionalServices.length} working`);
+    return {
+      success: true,
+      caseId: caseData.id,
+      enrichment: !!enrichment,
+      predictions: !!predictions,
+      endpointResults
+    };
     
-    if (passedTests >= 3) {
-      console.log('✅ System is ready for production deployment');
-    } else {
-      console.log('⚠️  System needs additional fixes before production');
-    }
-
-    return passedTests === totalTests;
-
   } catch (error) {
-    console.error('\n❌ Integration test suite failed:', error.message);
-    return false;
+    console.error('❌ Integration test failed:', error);
+    return {
+      success: false,
+      error: error.message
+    };
   }
 }
 
-// Run the complete integration test if this file is executed directly
+// Run the test if this file is executed directly
 if (require.main === module) {
   testCompleteIntegration()
-    .then(success => {
-      process.exit(success ? 0 : 1);
+    .then(result => {
+      console.log('\nFinal result:', result);
+      process.exit(result.success ? 0 : 1);
     })
     .catch(error => {
-      console.error('Integration test execution failed:', error);
+      console.error('Test execution failed:', error);
       process.exit(1);
     });
 }

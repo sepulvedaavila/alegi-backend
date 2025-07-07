@@ -134,47 +134,52 @@ class InternalAPIService {
       console.log(`Triggering sequential analysis for case ${caseId}`);
       
       const results = {
-        judgeTrends: null,
+        probability: null,
+        settlementAnalysis: null,
         precedents: null,
+        judgeTrends: null,
         riskAssessment: null,
+        costEstimate: null,
+        financialPrediction: null,
+        timelineEstimate: null,
+        findSimilar: null,
         errors: []
       };
 
-      // Trigger judge trends first
-      try {
-        results.judgeTrends = await this.triggerJudgeTrends(caseId);
-        console.log(`Judge trends completed for case ${caseId}`);
-      } catch (error) {
-        results.errors.push({ type: 'judge-trends', error: error.message });
-        console.error(`Judge trends failed for case ${caseId}:`, error.message);
-      }
+      // Define all analysis endpoints in order of priority
+      const analysisEndpoints = [
+        { name: 'probability', method: 'GET', path: `/api/cases/${caseId}/probability` },
+        { name: 'settlementAnalysis', method: 'GET', path: `/api/cases/${caseId}/settlement-analysis` },
+        { name: 'precedents', method: 'GET', path: `/api/cases/${caseId}/precedents` },
+        { name: 'judgeTrends', method: 'GET', path: `/api/cases/${caseId}/judge-trends` },
+        { name: 'riskAssessment', method: 'GET', path: `/api/cases/${caseId}/risk-assessment` },
+        { name: 'costEstimate', method: 'GET', path: `/api/cases/${caseId}/cost-estimate` },
+        { name: 'financialPrediction', method: 'GET', path: `/api/cases/${caseId}/financial-prediction` },
+        { name: 'timelineEstimate', method: 'GET', path: `/api/cases/${caseId}/timeline-estimate` },
+        { name: 'findSimilar', method: 'GET', path: `/api/cases/${caseId}/find-similar` }
+      ];
 
-      // Wait before next call
-      await new Promise(resolve => setTimeout(resolve, delayMs));
+      // Process each endpoint sequentially
+      for (const endpoint of analysisEndpoints) {
+        try {
+          console.log(`Triggering ${endpoint.name} for case ${caseId}`);
+          const result = await this.makeInternalCall(endpoint.method, endpoint.path);
+          results[endpoint.name] = result;
+          console.log(`${endpoint.name} completed for case ${caseId}`);
+        } catch (error) {
+          const errorMsg = error.response?.data?.error || error.message;
+          results.errors.push({ type: endpoint.name, error: errorMsg });
+          console.error(`${endpoint.name} failed for case ${caseId}:`, errorMsg);
+        }
 
-      // Trigger precedents
-      try {
-        results.precedents = await this.triggerPrecedents(caseId);
-        console.log(`Precedents completed for case ${caseId}`);
-      } catch (error) {
-        results.errors.push({ type: 'precedents', error: error.message });
-        console.error(`Precedents failed for case ${caseId}:`, error.message);
-      }
-
-      // Wait before next call
-      await new Promise(resolve => setTimeout(resolve, delayMs));
-
-      // Trigger risk assessment
-      try {
-        results.riskAssessment = await this.triggerRiskAssessment(caseId);
-        console.log(`Risk assessment completed for case ${caseId}`);
-      } catch (error) {
-        results.errors.push({ type: 'risk-assessment', error: error.message });
-        console.error(`Risk assessment failed for case ${caseId}:`, error.message);
+        // Wait before next call (except for the last one)
+        if (endpoint !== analysisEndpoints[analysisEndpoints.length - 1]) {
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
       }
 
       console.log(`Sequential analysis completed for case ${caseId}`, {
-        successful: Object.values(results).filter(r => r !== null).length,
+        successful: Object.values(results).filter(r => r !== null && !Array.isArray(r)).length,
         errors: results.errors.length
       });
 

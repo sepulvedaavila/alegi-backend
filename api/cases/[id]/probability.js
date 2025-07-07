@@ -44,6 +44,15 @@ async function getEvidenceSummary(caseId) {
 }
 
 module.exports = async (req, res) => {
+  // Handle CORS preflight requests
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Authorization');
+    res.status(200).end();
+    return;
+  }
+
   try {
     // Auth validation
     const user = await validateSupabaseToken(req);
@@ -76,6 +85,36 @@ module.exports = async (req, res) => {
     
     if (existing) {
       return res.json(existing.result);
+    }
+    
+    // Check if case has been processed at all
+    const { data: casePredictions } = await supabase
+      .from('case_predictions')
+      .select('*')
+      .eq('case_id', caseId)
+      .single();
+    
+    if (!casePredictions) {
+      // Case hasn't been processed yet, trigger processing
+      console.log(`Case ${caseId} not processed yet, triggering analysis`);
+      
+      try {
+        const processingService = require('../../../services/processing.service');
+        await processingService.triggerAnalysisForExistingCase(caseId, user.id);
+        
+        // Return a response indicating processing has been triggered
+        return res.status(202).json({
+          message: 'Analysis triggered',
+          status: 'processing',
+          estimatedTime: '2-5 minutes'
+        });
+      } catch (processingError) {
+        console.error('Failed to trigger processing:', processingError);
+        return res.status(500).json({
+          error: 'Failed to trigger analysis',
+          message: 'Please try again in a few minutes'
+        });
+      }
     }
     
     // Rate limit check

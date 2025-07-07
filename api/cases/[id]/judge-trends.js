@@ -187,6 +187,15 @@ async function analyzeJudicialPatterns(opinions, caseType) {
 }
 
 module.exports = async (req, res) => {
+  // Handle CORS preflight requests
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Authorization');
+    res.status(200).end();
+    return;
+  }
+
   try {
     const user = await validateSupabaseToken(req);
     const { id: caseId } = req.query;

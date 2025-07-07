@@ -703,6 +703,34 @@ app.get('/api/cases/:caseId/enhanced-status', authenticateJWT, async (req, res) 
   }
 });
 
+// Trigger analysis for existing cases endpoint
+app.post('/api/cases/:caseId/trigger-analysis', authenticateJWT, async (req, res) => {
+  try {
+    const { caseId } = req.params;
+    
+    if (!processingService) {
+      return res.status(500).json({ error: 'Processing service not available' });
+    }
+    
+    console.log(`Triggering analysis for case ${caseId} by user ${req.user.id}`);
+    
+    const result = await processingService.triggerAnalysisForExistingCase(caseId, req.user.id);
+    
+    res.json({
+      success: true,
+      ...result,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Trigger analysis error:', error);
+    res.status(500).json({
+      error: 'Failed to trigger analysis',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // Document processing now handled by processing service
 // This function is kept for backward compatibility but delegates to the service
 
