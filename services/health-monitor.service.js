@@ -99,8 +99,19 @@ class HealthMonitorService {
         };
       }
 
-      // Try a simple search to test connectivity
-      const results = await courtListenerService.searchCases('test', { page_size: 1 });
+      // Use a lighter health check with shorter timeout
+      const healthCheckPromise = courtListenerService.searchCases('test', { 
+        page_size: 1,
+        filed_after: '2024-01-01' // Limit search scope for faster response
+      });
+      
+      // Add a timeout wrapper for the health check
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Health check timeout')), 10000); // 10 second timeout for health check
+      });
+
+      const results = await Promise.race([healthCheckPromise, timeoutPromise]);
+      
       return {
         service: 'courtlistener',
         status: 'up',
@@ -108,6 +119,9 @@ class HealthMonitorService {
         timestamp: new Date().toISOString()
       };
     } catch (error) {
+      // Don't let health check failures affect the circuit breaker
+      console.warn('CourtListener health check failed:', error.message);
+      
       return {
         service: 'courtlistener',
         status: 'down',

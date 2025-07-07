@@ -8,9 +8,11 @@ class CircuitBreakerService {
     
     if (breaker.state === 'OPEN') {
       if (Date.now() - breaker.lastFailTime < breaker.timeout) {
-        throw new Error(`Circuit breaker OPEN for ${serviceName}`);
+        const remainingTime = Math.ceil((breaker.timeout - (Date.now() - breaker.lastFailTime)) / 1000);
+        throw new Error(`Circuit breaker OPEN for ${serviceName} (resets in ${remainingTime}s)`);
       }
       breaker.state = 'HALF_OPEN';
+      console.log(`Circuit breaker for ${serviceName} transitioning to HALF_OPEN`);
     }
 
     try {
@@ -18,14 +20,23 @@ class CircuitBreakerService {
       if (breaker.state === 'HALF_OPEN') {
         breaker.state = 'CLOSED';
         breaker.failureCount = 0;
+        console.log(`Circuit breaker for ${serviceName} reset to CLOSED`);
       }
       return result;
     } catch (error) {
       breaker.failureCount++;
       breaker.lastFailTime = Date.now();
       
+      // Log the failure for debugging
+      console.warn(`Circuit breaker failure for ${serviceName}:`, {
+        failureCount: breaker.failureCount,
+        threshold: breaker.threshold,
+        error: error.message
+      });
+      
       if (breaker.failureCount >= breaker.threshold) {
         breaker.state = 'OPEN';
+        console.error(`Circuit breaker for ${serviceName} opened after ${breaker.failureCount} failures`);
       }
       throw error;
     }
@@ -49,10 +60,17 @@ class CircuitBreakerService {
     if (!breaker) {
       return { state: 'UNKNOWN', failureCount: 0 };
     }
+    
+    const timeSinceLastFail = Date.now() - breaker.lastFailTime;
+    const remainingTimeout = breaker.state === 'OPEN' ? 
+      Math.max(0, breaker.timeout - timeSinceLastFail) : 0;
+    
     return {
       state: breaker.state,
       failureCount: breaker.failureCount,
+      threshold: breaker.threshold,
       lastFailTime: breaker.lastFailTime,
+      remainingTimeout,
       isOpen: breaker.state === 'OPEN'
     };
   }
@@ -63,6 +81,7 @@ class CircuitBreakerService {
       breaker.state = 'CLOSED';
       breaker.failureCount = 0;
       breaker.lastFailTime = 0;
+      console.log(`Circuit breaker for ${serviceName} manually reset`);
     }
   }
 

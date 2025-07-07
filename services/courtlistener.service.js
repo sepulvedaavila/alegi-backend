@@ -10,6 +10,8 @@ class CourtListenerService {
       lastCall: 0,
       minInterval: 1000 // 1 second between calls
     };
+    // Increased timeout for better reliability
+    this.requestTimeout = parseInt(process.env.COURTLISTENER_TIMEOUT) || 30000; // 30 seconds
   }
 
   async makeAPICall(endpoint, params = {}) {
@@ -41,7 +43,7 @@ class CourtListenerService {
       }
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      const timeoutId = setTimeout(() => controller.abort(), this.requestTimeout);
 
       try {
         const response = await fetch(url.toString(), {
@@ -60,23 +62,45 @@ class CourtListenerService {
         clearTimeout(timeoutId);
         
         if (error.name === 'AbortError') {
-          throw new Error('CourtListener API timeout');
+          throw new Error(`CourtListener API timeout after ${this.requestTimeout}ms`);
         }
         throw error;
       }
-    }, { threshold: 3, timeout: 300000 });
+    }, { threshold: 5, timeout: 60000 }); // Reduced circuit breaker timeout to 1 minute
   }
 
   async searchCases(query, filters = {}) {
     try {
-      const response = await this.makeAPICall('search/', {
-        q: query,
-        type: 'o', // opinions
-        order_by: 'score desc',
-        ...filters
-      });
+      // Add timeout and retry logic for search operations
+      const maxRetries = 2;
+      let lastError;
+
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          const response = await this.makeAPICall('search/', {
+            q: query,
+            type: 'o', // opinions
+            order_by: 'score desc',
+            ...filters
+          });
+          
+          return response.results || [];
+        } catch (error) {
+          lastError = error;
+          
+          // If it's a timeout and we have retries left, wait and retry
+          if (error.message.includes('timeout') && attempt < maxRetries) {
+            console.warn(`CourtListener search timeout, retrying (${attempt}/${maxRetries})...`);
+            await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Exponential backoff
+            continue;
+          }
+          
+          // For other errors or final attempt, break and throw
+          break;
+        }
+      }
       
-      return response.results || [];
+      throw lastError;
     } catch (error) {
       console.error('CourtListener search error:', error);
       Sentry.captureException(error, {
