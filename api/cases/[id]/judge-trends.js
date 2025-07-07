@@ -115,6 +115,16 @@ async function identifyRulingPatterns(opinions, caseType) {
     return JSON.parse(analysis.choices[0].message.content);
   } catch (error) {
     console.error('Error identifying ruling patterns:', error);
+    
+    // Check if it's a quota exceeded error
+    if (error.code === 'insufficient_quota' || error.status === 429) {
+      console.warn('OpenAI quota exceeded for judge pattern analysis');
+      return { 
+        patterns: ['AI analysis unavailable due to quota limits'],
+        warning: 'Pattern analysis limited due to OpenAI quota'
+      };
+    }
+    
     return { patterns: ['Analysis failed'] };
   }
 }
@@ -215,13 +225,13 @@ module.exports = async (req, res) => {
     // Search CourtListener for judge's cases
     let judgeOpinions = [];
     try {
-      const searchResults = await courtListenerService.searchByJudge({
-        judge_name: judgeName,
+      const searchQuery = `judge:"${judgeName}"`;
+      const searchResults = await courtListenerService.searchCases(searchQuery, {
         court: court,
         filed_after: getDateYearsAgo(5) // Last 5 years
       });
       
-      judgeOpinions = searchResults.results || [];
+      judgeOpinions = searchResults || [];
     } catch (error) {
       console.error('Error fetching judge opinions:', error);
       // Continue with empty results

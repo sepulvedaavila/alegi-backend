@@ -156,7 +156,31 @@ async function predictFinancialOutcome(data) {
   } catch (error) {
     console.error('Error predicting financial outcome:', error);
     
-    // Return fallback predictions
+    // Check if it's a quota exceeded error
+    if (error.code === 'insufficient_quota' || error.status === 429) {
+      console.warn('OpenAI quota exceeded, using fallback predictions');
+      // Return fallback predictions with clear indication
+      const baseAmount = data.case.damages_requested || 100000;
+      return {
+        settlement: {
+          low: baseAmount * 0.3,
+          likely: baseAmount * 0.6,
+          high: baseAmount * 0.9,
+          confidence: 0.4
+        },
+        verdict: {
+          low: baseAmount * 0.2,
+          likely: baseAmount * 0.8,
+          high: baseAmount * 1.5,
+          confidence: 0.3
+        },
+        factors: ['OpenAI quota exceeded, using fallback estimates'],
+        methodology: 'quota_exceeded_fallback',
+        warning: 'AI analysis unavailable due to quota limits'
+      };
+    }
+    
+    // Return fallback predictions for other errors
     const baseAmount = data.case.damages_requested || 100000;
     return {
       settlement: {

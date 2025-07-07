@@ -65,14 +65,12 @@ async function searchCourtListenerSimilarCases(caseData, filters) {
   try {
     const searchQuery = buildSearchQuery(caseData);
     
-    const searchResults = await courtListenerService.search({
-      q: searchQuery,
-      type: 'o', // opinions
+    const searchResults = await courtListenerService.searchCases(searchQuery, {
       filed_after: getRelevantDateRange(caseData),
       court: mapToCourtListenerCourt(caseData.jurisdiction)
     });
     
-    return searchResults.results || [];
+    return searchResults || [];
   } catch (error) {
     console.error('Error searching CourtListener:', error);
     return [];
@@ -172,14 +170,28 @@ async function scoreCaseSimilarity(targetCase, candidateCases) {
       scored.push(...batchScores.cases);
     } catch (error) {
       console.error('Error scoring case similarity batch:', error);
-      // Add fallback scores
-      batch.forEach(caseItem => {
-        scored.push({
-          ...caseItem,
-          similarity: 50, // Default score
-          matchingFactors: ['Analysis failed']
+      
+      // Check if it's a quota exceeded error
+      if (error.code === 'insufficient_quota' || error.status === 429) {
+        console.warn('OpenAI quota exceeded for case similarity scoring');
+        batch.forEach(caseItem => {
+          scored.push({
+            ...caseItem,
+            similarity: 50, // Default score
+            matchingFactors: ['AI analysis unavailable due to quota limits'],
+            warning: 'Similarity scoring limited due to OpenAI quota'
+          });
         });
-      });
+      } else {
+        // Add fallback scores for other errors
+        batch.forEach(caseItem => {
+          scored.push({
+            ...caseItem,
+            similarity: 50, // Default score
+            matchingFactors: ['Analysis failed']
+          });
+        });
+      }
     }
   }
   

@@ -21,6 +21,7 @@ module.exports = {
     rateLimiter: require('./rateLimiter'),
     queueService: require('./queueService'),
     costMonitor: require('./costMonitor.service'),
+    courtlistenerService: require('./courtlistener.service'),
     
     // Re-export individual services for backwards compatibility
     SupabaseService: require('./supabase.service'),
@@ -36,5 +37,6 @@ module.exports = {
     NotificationService: require('./notification.service'),
     RateLimiter: require('./rateLimiter'),
     QueueService: require('./queueService'),
-    CostMonitor: require('./costMonitor.service')
+    CostMonitor: require('./costMonitor.service'),
+    CourtListenerService: require('./courtlistener.service')
   };

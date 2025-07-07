@@ -181,12 +181,13 @@ module.exports = async (req, res) => {
     
     let searchResults = { results: [] };
     try {
-      searchResults = await courtListenerService.search({
-        q: searchQuery,
-        type: 'o', // opinions
+      searchResults = await courtListenerService.searchCases(searchQuery, {
         filed_after: getRelevantDateRange(caseData),
         court: mapToCourtListenerCourt(caseData.jurisdiction)
       });
+      
+      // Convert to expected format
+      searchResults = { results: searchResults };
     } catch (error) {
       console.error('CourtListener search failed:', error);
       // Return empty results if CourtListener fails
