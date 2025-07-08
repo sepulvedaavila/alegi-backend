@@ -23,6 +23,11 @@ class ProcessingService {
       
       console.log(`Processing document ${documentId} for case ${caseId}`);
       
+      // Check if Supabase is available
+      if (!this.supabase) {
+        throw new Error('Database service not available');
+      }
+      
       // Update document status to processing
       await this.supabase
         .from('case_documents')
@@ -53,13 +58,17 @@ class ProcessingService {
       
       // Update document status to failed
       if (this.supabase) {
-        await this.supabase
-          .from('case_documents')
-          .update({ 
-            processing_status: 'failed',
-            error_message: error.message
-          })
-          .eq('id', data.documentId);
+        try {
+          await this.supabase
+            .from('case_documents')
+            .update({ 
+              processing_status: 'failed',
+              error_message: error.message
+            })
+            .eq('id', data.documentId);
+        } catch (updateError) {
+          console.error('Failed to update document status:', updateError);
+        }
       }
       
       throw error;
@@ -69,6 +78,11 @@ class ProcessingService {
   async triggerAnalysisForExistingCase(caseId, userId) {
     try {
       console.log(`Triggering analysis for case ${caseId}`);
+      
+      // Check if Supabase is available
+      if (!this.supabase) {
+        throw new Error('Database service not available');
+      }
       
       // Update case status
       await this.supabase
@@ -104,13 +118,17 @@ class ProcessingService {
       
       // Update case status to failed
       if (this.supabase) {
-        await this.supabase
-          .from('case_briefs')
-          .update({ 
-            processing_status: 'failed',
-            error_message: error.message
-          })
-          .eq('id', caseId);
+        try {
+          await this.supabase
+            .from('case_briefs')
+            .update({ 
+              processing_status: 'failed',
+              error_message: error.message
+            })
+            .eq('id', caseId);
+        } catch (updateError) {
+          console.error('Failed to update case status:', updateError);
+        }
       }
       
       throw error;

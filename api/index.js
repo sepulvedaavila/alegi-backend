@@ -229,6 +229,9 @@ try {
   processingService = {
     processDocument: async () => {
       throw new Error('Processing service not available');
+    },
+    triggerAnalysisForExistingCase: async () => {
+      throw new Error('Processing service not available');
     }
   };
 }
