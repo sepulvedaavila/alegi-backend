@@ -170,7 +170,7 @@ function generatePaymentSchedule(estimates, currentStage, strategy) {
   
   return phases.map(phase => ({
     ...phase,
-    amount: estimates.total.likely * phase.percentage,
+    amount: estimates.total.avg * phase.percentage,
     status: getPhaseStatus(phase.phase, currentStage)
   }));
 }

@@ -39,7 +39,7 @@ if (process.env.NODE_ENV === 'production') {
 app.use(helmet());
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
-    ? ['https://alegi-frontend.vercel.app/', 'https://app.alegi.io']
+    ? ['https://alegi-frontend.vercel.app', 'https://app.alegi.io']
     : ['http://localhost:3000', 'http://localhost:5173'],
   credentials: true
 }));

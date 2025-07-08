@@ -5,6 +5,10 @@ class PDFCoService {
   constructor() {
     this.apiKey = process.env.PDF_CO_API_KEY || process.env.PDFCO_API_KEY;
     this.baseURL = 'https://api.pdf.co/v1';
+    
+    if (!this.apiKey) {
+      console.error('PDFco API key not configured - PDF processing will fail');
+    }
   }
 
   async extractText(filePath, fileBuffer) {
