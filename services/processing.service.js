@@ -86,7 +86,23 @@ class ProcessingService {
         throw new Error('Database service not available');
       }
       
-      // Update case status
+      // Check if case is already being processed
+      const { data: caseData } = await this.supabase
+        .from('case_briefs')
+        .select('processing_status')
+        .eq('id', caseId)
+        .single();
+      
+      if (caseData?.processing_status === 'processing') {
+        return { 
+          success: true, 
+          caseId,
+          message: 'Case is already being processed',
+          status: 'processing'
+        };
+      }
+      
+      // Update case status to processing
       await this.supabase
         .from('case_briefs')
         .update({ 
@@ -95,25 +111,35 @@ class ProcessingService {
         })
         .eq('id', caseId);
 
-      // Simulate analysis processing
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Import and execute linear pipeline asynchronously
+      const LinearPipelineService = require('./linear-pipeline.service');
+      const linearPipeline = new LinearPipelineService();
       
-      // Update case status to completed
-      await this.supabase
-        .from('case_briefs')
-        .update({ 
-          processing_status: 'completed',
-          ai_processed: true,
-          last_ai_update: new Date().toISOString()
-        })
-        .eq('id', caseId);
+      setImmediate(async () => {
+        try {
+          console.log(`Starting linear pipeline for case ${caseId}`);
+          await linearPipeline.executeLinearPipeline(caseId);
+          console.log(`Linear pipeline completed for case ${caseId}`);
+        } catch (error) {
+          console.error(`Linear pipeline failed for case ${caseId}:`, error);
+          await this.supabase
+            .from('case_briefs')
+            .update({ 
+              processing_status: 'failed',
+              error_message: error.message
+            })
+            .eq('id', caseId);
+        }
+      });
 
       console.log(`Analysis triggered successfully for case ${caseId}`);
       
       return { 
         success: true, 
         caseId,
-        message: 'Analysis triggered successfully'
+        message: 'Analysis triggered successfully',
+        status: 'processing',
+        estimatedTime: '2-5 minutes'
       };
     } catch (error) {
       console.error('Analysis trigger error:', error);

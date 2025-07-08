@@ -389,6 +389,82 @@ app.get('/api/cases/:caseId', authenticateJWT, async (req, res) => {
   }
 });
 
+// Comprehensive case data endpoint - Frontend should use this
+app.get('/api/cases/:caseId/data', authenticateJWT, async (req, res) => {
+  try {
+    const { caseId } = req.params;
+    
+    // Get basic case data
+    const { data: caseData, error: caseError } = await supabase
+      .from('case_briefs')
+      .select('*')
+      .eq('id', caseId)
+      .single();
+    
+    if (caseError) {
+      return res.status(404).json({ error: 'Case not found' });
+    }
+    
+    // Get AI enrichment if available
+    const { data: enrichment } = await supabase
+      .from('case_ai_enrichment')
+      .select('*')
+      .eq('case_id', caseId)
+      .single();
+    
+    // Get predictions if available
+    const { data: predictions } = await supabase
+      .from('case_predictions')
+      .select('*')
+      .eq('case_id', caseId)
+      .single();
+    
+    // Get all analysis results
+    const { data: analysisResults } = await supabase
+      .from('case_analysis')
+      .select('*')
+      .eq('case_id', caseId);
+    
+    // Organize analysis results by type
+    const analysis = {};
+    if (analysisResults) {
+      analysisResults.forEach(result => {
+        analysis[result.analysis_type] = result.result;
+      });
+    }
+    
+    // Determine if case needs processing
+    const needsProcessing = !enrichment && !predictions && caseData.processing_status !== 'processing';
+    const isProcessing = caseData.processing_status === 'processing';
+    
+    const response = {
+      caseId,
+      case: caseData,
+      enrichment: enrichment || null,
+      predictions: predictions || null,
+      analysis: analysis || {},
+      status: {
+        needsProcessing,
+        isProcessing,
+        processingStatus: caseData.processing_status,
+        lastUpdate: caseData.last_ai_update,
+        hasData: !!(enrichment || predictions || Object.keys(analysis).length > 0)
+      },
+      timestamp: new Date().toISOString()
+    };
+    
+    res.json(response);
+    
+  } catch (error) {
+    console.error('Case data fetch error:', error);
+    res.status(500).json({
+      error: 'Failed to fetch case data',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // Processing status endpoint
 app.get('/api/cases/:caseId/status', authenticateJWT, async (req, res) => {
   try {
@@ -779,7 +855,10 @@ app.post('/api/cases/:caseId/trigger-analysis', authenticateJWT, async (req, res
     
     const result = await processingService.triggerAnalysisForExistingCase(caseId, req.user.id);
     
-    res.json({
+    // Return 202 if processing was triggered, 200 if already processing
+    const statusCode = result.status === 'processing' ? 202 : 200;
+    
+    res.status(statusCode).json({
       success: true,
       ...result,
       timestamp: new Date().toISOString()
