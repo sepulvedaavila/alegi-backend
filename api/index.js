@@ -223,18 +223,18 @@ let processingService;
 try {
   const { processingService: procService } = require('../services');
   processingService = procService;
-} catch (error) {
-  console.error('Failed to load processing service:', error.message);
-  // Provide fallback
-  processingService = {
-    processDocument: async () => {
-      throw new Error('Processing service not available');
-    },
-    triggerAnalysisForExistingCase: async () => {
-      throw new Error('Processing service not available');
-    }
-  };
-}
+  } catch (error) {
+    console.error('Failed to load processing service:', error.message);
+    // Provide fallback with better error messages
+    processingService = {
+      processDocument: async () => {
+        throw new Error('Processing service not available - failed to load processing service module');
+      },
+      triggerAnalysisForExistingCase: async () => {
+        throw new Error('Processing service not available - failed to load processing service module');
+      }
+    };
+  }
 
 async function processDocumentDirect(caseId, documentId) {
   try {
@@ -865,10 +865,28 @@ app.post('/api/cases/:caseId/trigger-analysis', authenticateJWT, async (req, res
     });
   } catch (error) {
     console.error('Trigger analysis error:', error);
+    
+    // Provide more helpful error messages
+    let errorMessage = error.message;
+    let errorCode = 'PROCESSING_ERROR';
+    
+    if (error.message.includes('Database service not available')) {
+      errorCode = 'DATABASE_UNAVAILABLE';
+      errorMessage = 'Database service is currently unavailable. Please try again later or contact support if the issue persists.';
+    } else if (error.message.includes('Processing service not available')) {
+      errorCode = 'SERVICE_UNAVAILABLE';
+      errorMessage = 'Processing service is currently unavailable. Please try again later or contact support if the issue persists.';
+    } else if (error.message.includes('Case not found')) {
+      errorCode = 'CASE_NOT_FOUND';
+      errorMessage = 'The specified case could not be found.';
+    }
+    
     res.status(500).json({
       error: 'Failed to trigger analysis',
-      message: error.message,
-      timestamp: new Date().toISOString()
+      message: errorMessage,
+      code: errorCode,
+      timestamp: new Date().toISOString(),
+      retryable: errorCode === 'DATABASE_UNAVAILABLE' || errorCode === 'SERVICE_UNAVAILABLE'
     });
   }
 });

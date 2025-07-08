@@ -16,6 +16,28 @@ class ProcessingService {
         process.env.SUPABASE_URL,
         process.env.SUPABASE_SERVICE_KEY
       );
+      console.log('[ProcessingService] Supabase client initialized successfully');
+    } else {
+      console.warn('[ProcessingService] Supabase environment variables not found - creating mock client');
+      // Create a mock client that throws descriptive errors
+      this.supabase = {
+        from: (table) => ({
+          select: () => ({
+            eq: () => ({ 
+              single: () => Promise.reject(new Error('Database service not available - missing SUPABASE_URL or SUPABASE_SERVICE_KEY')) 
+            }),
+            limit: () => Promise.reject(new Error('Database service not available - missing SUPABASE_URL or SUPABASE_SERVICE_KEY'))
+          }),
+          update: () => ({ 
+            eq: () => Promise.reject(new Error('Database service not available - missing SUPABASE_URL or SUPABASE_SERVICE_KEY')) 
+          }),
+          insert: () => Promise.reject(new Error('Database service not available - missing SUPABASE_URL or SUPABASE_SERVICE_KEY')),
+          upsert: () => Promise.reject(new Error('Database service not available - missing SUPABASE_URL or SUPABASE_SERVICE_KEY')),
+          delete: () => ({ 
+            eq: () => Promise.reject(new Error('Database service not available - missing SUPABASE_URL or SUPABASE_SERVICE_KEY')) 
+          })
+        })
+      };
     }
   }
 
@@ -83,7 +105,12 @@ class ProcessingService {
       
       // Check if Supabase is available
       if (!this.supabase) {
-        throw new Error('Database service not available');
+        throw new Error('Database service not available - Supabase client not initialized');
+      }
+      
+      // Check if environment variables are missing
+      if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
+        throw new Error('Database service not available - missing SUPABASE_URL or SUPABASE_SERVICE_KEY environment variables');
       }
       
       // Check if case is already being processed
