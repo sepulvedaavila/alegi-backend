@@ -1,6 +1,5 @@
 // services/email.service.js
 const nodemailer = require('nodemailer');
-const circuitBreaker = require('./circuit-breaker.service');
 
 class EmailService {
   constructor() {
@@ -87,11 +86,7 @@ class EmailService {
     
     for (const { name, service } of this.providers) {
       try {
-        const result = await circuitBreaker.callWithCircuitBreaker(
-          `email-${name}`,
-          () => service.send(emailData),
-          { threshold: 3, timeout: 30000 }
-        );
+        const result = await service.send(emailData);
         
         console.log(`Email sent successfully via ${name}`);
         return { success: true, provider: name, result };

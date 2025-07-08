@@ -1,11 +1,8 @@
 const courtListenerService = require('../../services/courtlistener.service');
-const circuitBreaker = require('../../services/circuit-breaker.service');
+// Circuit breaker service removed - using direct calls
 
 module.exports = async (req, res) => {
   try {
-    // Get circuit breaker status
-    const breakerStatus = circuitBreaker.getBreakerStatus('courtlistener');
-    
     // Get service configuration
     const config = {
       apiKeyConfigured: !!process.env.COURTLISTENER_API_KEY,
@@ -41,7 +38,6 @@ module.exports = async (req, res) => {
       service: 'courtlistener',
       timestamp: new Date().toISOString(),
       config,
-      circuitBreaker: breakerStatus,
       healthCheck,
       environment: process.env.NODE_ENV || 'development'
     };

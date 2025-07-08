@@ -1,5 +1,5 @@
 const emailService = require('../services/email.service');
-const circuitBreaker = require('../services/circuit-breaker.service');
+// Circuit breaker service removed - using direct calls
 
 async function testEmailService() {
   console.log('🧪 Testing Email Service Integration...\n');
@@ -12,12 +12,8 @@ async function testEmailService() {
       console.log(`   Provider ${index + 1}: ${provider.name}`);
     });
 
-    // Test 2: Test circuit breaker status
-    console.log('\n2. Testing Circuit Breakers...');
-    emailService.providers.forEach(provider => {
-      const breakerStatus = circuitBreaker.getBreakerStatus(`email-${provider.name}`);
-      console.log(`   ${provider.name} Breaker:`, JSON.stringify(breakerStatus, null, 2));
-    });
+    // Test 2: Circuit breaker removed - service uses direct calls
+    console.log('\n2. Circuit Breaker Status: Removed - using direct calls');
 
     // Test 3: Test basic email sending
     console.log('\n3. Testing Basic Email Sending...');
@@ -84,13 +80,8 @@ async function testEmailService() {
     if (emailService.providers.length > 1) {
       console.log('   Multiple providers available - fallback mechanism is in place');
       
-      // Test circuit breaker by simulating failures
-      emailService.providers.forEach((provider, index) => {
-        if (index === 0) { // Only test first provider
-          const breaker = circuitBreaker.getBreakerStatus(`email-${provider.name}`);
-          console.log(`   ${provider.name} Circuit Breaker State: ${breaker.state}`);
-        }
-      });
+      // Circuit breaker removed - service uses direct calls
+      console.log('   Circuit breaker removed - using direct calls');
     } else {
       console.log('   Single provider - fallback to console logging');
     }

@@ -1,6 +1,5 @@
 const axios = require('axios');
 const Sentry = require('@sentry/node');
-const circuitBreaker = require('./circuit-breaker.service');
 const { mapToCourtListenerCourt } = require('../utils/courtMaps');
 
 class CourtListenerService {
@@ -16,58 +15,56 @@ class CourtListenerService {
   }
 
   async makeAPICall(endpoint, params = {}) {
-    return await circuitBreaker.callWithCircuitBreaker('courtlistener', async () => {
-      // Rate limiting
-      const now = Date.now();
-      const timeSinceLastCall = now - this.rateLimiter.lastCall;
-      if (timeSinceLastCall < this.rateLimiter.minInterval) {
-        await new Promise(resolve => 
-          setTimeout(resolve, this.rateLimiter.minInterval - timeSinceLastCall)
-        );
-      }
-      this.rateLimiter.lastCall = Date.now();
+    // Rate limiting
+    const now = Date.now();
+    const timeSinceLastCall = now - this.rateLimiter.lastCall;
+    if (timeSinceLastCall < this.rateLimiter.minInterval) {
+      await new Promise(resolve => 
+        setTimeout(resolve, this.rateLimiter.minInterval - timeSinceLastCall)
+      );
+    }
+    this.rateLimiter.lastCall = Date.now();
 
-      const url = new URL(endpoint, this.baseURL);
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          url.searchParams.append(key, value);
-        }
+    const url = new URL(endpoint, this.baseURL);
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        url.searchParams.append(key, value);
+      }
+    });
+
+    const headers = {
+      'Accept': 'application/json',
+      'User-Agent': 'Alegi-Legal-Platform/1.0'
+    };
+
+    if (this.apiKey) {
+      headers['Authorization'] = `Token ${this.apiKey}`;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.requestTimeout);
+
+    try {
+      const response = await fetch(url.toString(), {
+        headers,
+        signal: controller.signal
       });
 
-      const headers = {
-        'Accept': 'application/json',
-        'User-Agent': 'Alegi-Legal-Platform/1.0'
-      };
+      clearTimeout(timeoutId);
 
-      if (this.apiKey) {
-        headers['Authorization'] = `Token ${this.apiKey}`;
+      if (!response.ok) {
+        throw new Error(`CourtListener API error: ${response.status} ${response.statusText}`);
       }
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), this.requestTimeout);
-
-      try {
-        const response = await fetch(url.toString(), {
-          headers,
-          signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-          throw new Error(`CourtListener API error: ${response.status} ${response.statusText}`);
-        }
-
-        return await response.json();
-      } catch (error) {
-        clearTimeout(timeoutId);
-        
-        if (error.name === 'AbortError') {
-          throw new Error(`CourtListener API timeout after ${this.requestTimeout}ms`);
-        }
-        throw error;
+      return await response.json();
+    } catch (error) {
+      clearTimeout(timeoutId);
+      
+      if (error.name === 'AbortError') {
+        throw new Error(`CourtListener API timeout after ${this.requestTimeout}ms`);
       }
-    }, { threshold: 5, timeout: 60000 }); // Reduced circuit breaker timeout to 1 minute
+      throw error;
+    }
   }
 
   async searchCases(query, filters = {}) {

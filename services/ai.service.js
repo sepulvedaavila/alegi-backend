@@ -4,7 +4,6 @@ const Sentry = require('@sentry/node');
 const courtListenerService = require('./courtlistener.service');
 const { AI_PROMPTS } = require('./ai.prompts');
 const aiConfig = require('./ai.config');
-const circuitBreaker = require('./circuit-breaker.service');
 
 class AIService {
   constructor() {
@@ -104,7 +103,7 @@ class AIService {
     return Math.ceil(text.length / aiConfig.tokenEstimation.charactersPerToken);
   }
 
-  // Rate-limited OpenAI API call wrapper with circuit breaker
+  // Rate-limited OpenAI API call wrapper
   async makeOpenAICall(model, messages, options = {}) {
     // If using mock service, return mock response
     if (this.isMock) {
@@ -129,64 +128,62 @@ class AIService {
       };
     }
 
-    return await circuitBreaker.callWithCircuitBreaker('openai', async () => {
-      // Estimate tokens for rate limiting
-      const messageText = messages.map(m => m.content).join(' ');
-      const estimatedTokens = this.estimateTokens(messageText);
+    // Estimate tokens for rate limiting
+    const messageText = messages.map(m => m.content).join(' ');
+    const estimatedTokens = this.estimateTokens(messageText);
+    
+    // Check rate limits before making call
+    await this.checkRateLimit(model, estimatedTokens);
+    
+    // Add delay between calls to be extra safe
+    const delayBetweenCalls = aiConfig.delayBetweenCalls;
+    await new Promise(resolve => setTimeout(resolve, delayBetweenCalls));
+    
+    // Add timeout to prevent hanging requests
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    
+    try {
+      const response = await this.openai.chat.completions.create({
+        model,
+        messages,
+        signal: controller.signal,
+        ...options
+      });
       
-      // Check rate limits before making call
-      await this.checkRateLimit(model, estimatedTokens);
+      clearTimeout(timeoutId);
       
-      // Add delay between calls to be extra safe
-      const delayBetweenCalls = aiConfig.delayBetweenCalls;
-      await new Promise(resolve => setTimeout(resolve, delayBetweenCalls));
-      
-      // Add timeout to prevent hanging requests
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
-      
-      try {
-        const response = await this.openai.chat.completions.create({
+      // Log actual usage for monitoring
+      if (response.usage) {
+        console.log(`OpenAI API call completed:`, {
           model,
-          messages,
-          signal: controller.signal,
-          ...options
+          promptTokens: response.usage.prompt_tokens,
+          completionTokens: response.usage.completion_tokens,
+          totalTokens: response.usage.total_tokens
         });
-        
-        clearTimeout(timeoutId);
-        
-        // Log actual usage for monitoring
-        if (response.usage) {
-          console.log(`OpenAI API call completed:`, {
-            model,
-            promptTokens: response.usage.prompt_tokens,
-            completionTokens: response.usage.completion_tokens,
-            totalTokens: response.usage.total_tokens
-          });
-        }
-        
-        return response;
-      } catch (error) {
-        clearTimeout(timeoutId);
-        
-        // Handle specific OpenAI errors
-        if (error.status === 429) {
-          const retryAfter = error.headers?.['retry-after'] || 60;
-          await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
-          throw new Error(`Rate limited, retry after ${retryAfter}s`);
-        }
-        
-        if (error.status >= 500) {
-          throw new Error(`OpenAI server error: ${error.message}`);
-        }
-        
-        if (error.name === 'AbortError') {
-          throw new Error('OpenAI API timeout');
-        }
-        
-        throw error;
       }
-    }, { threshold: 3, timeout: 300000 }); // 5 minute circuit breaker
+      
+      return response;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      
+      // Handle specific OpenAI errors
+      if (error.status === 429) {
+        const retryAfter = error.headers?.['retry-after'] || 60;
+        await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+        throw new Error(`Rate limited, retry after ${retryAfter}s`);
+      }
+      
+      if (error.status >= 500) {
+        throw new Error(`OpenAI server error: ${error.message}`);
+      }
+      
+      if (error.name === 'AbortError') {
+        throw new Error('OpenAI API timeout');
+      }
+      
+      throw error;
+    }
   }
 
   // Step 1: Legal Case Intake Analysis

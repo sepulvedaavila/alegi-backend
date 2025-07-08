@@ -1,5 +1,5 @@
 const pdfService = require('../services/pdf.service');
-const circuitBreaker = require('../services/circuit-breaker.service');
+// Circuit breaker service removed - using direct calls
 
 async function testPDFProcessing() {
   console.log('🧪 Testing PDF Processing Integration...\n');
@@ -12,12 +12,8 @@ async function testPDFProcessing() {
       console.log(`   Provider ${index + 1}: ${provider.name}`);
     });
 
-    // Test 2: Test circuit breaker status
-    console.log('\n2. Testing Circuit Breakers...');
-    const pdfPrimaryBreaker = circuitBreaker.getBreakerStatus('pdf-primary');
-    const pdfFallbackBreaker = circuitBreaker.getBreakerStatus('pdf-fallback');
-    console.log('   Primary PDF Breaker:', JSON.stringify(pdfPrimaryBreaker, null, 2));
-    console.log('   Fallback PDF Breaker:', JSON.stringify(pdfFallbackBreaker, null, 2));
+    // Test 2: Circuit breaker removed - service uses direct calls
+    console.log('\n2. Circuit Breaker Status: Removed - using direct calls');
 
     // Test 3: Test text extraction with mock data
     console.log('\n3. Testing Text Extraction...');

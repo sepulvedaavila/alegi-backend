@@ -1,5 +1,5 @@
 const aiService = require('../services/ai.service');
-const circuitBreaker = require('../services/circuit-breaker.service');
+// Circuit breaker service removed - using direct calls
 
 async function testOpenAIIntegration() {
   console.log('🧪 Testing OpenAI Integration...\n');
@@ -15,10 +15,8 @@ async function testOpenAIIntegration() {
     const rateLimitStatus = aiService.getRateLimitStatus();
     console.log('   Rate Limit Status:', JSON.stringify(rateLimitStatus, null, 2));
 
-    // Test 3: Test circuit breaker status
-    console.log('\n3. Testing Circuit Breaker...');
-    const breakerStatus = circuitBreaker.getBreakerStatus('openai');
-    console.log('   Circuit Breaker Status:', JSON.stringify(breakerStatus, null, 2));
+    // Test 3: Circuit breaker removed - service uses direct calls
+    console.log('\n3. Circuit Breaker Status: Removed - using direct calls');
 
     // Test 4: Make a test API call (if not in mock mode)
     if (!aiService.isMock) {

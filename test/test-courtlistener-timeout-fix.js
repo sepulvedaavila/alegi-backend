@@ -1,14 +1,12 @@
 const courtListenerService = require('../services/courtlistener.service');
-const circuitBreaker = require('../services/circuit-breaker.service');
+// Circuit breaker service removed - using direct calls
 
 async function testCourtListenerTimeoutFix() {
   console.log('🧪 Testing CourtListener Timeout Fix...\n');
 
   try {
-    // Test 1: Check current circuit breaker status
-    console.log('1. Checking Circuit Breaker Status...');
-    const breakerStatus = circuitBreaker.getBreakerStatus('courtlistener');
-    console.log('   Circuit Breaker Status:', JSON.stringify(breakerStatus, null, 2));
+    // Test 1: Circuit breaker removed - service uses direct calls
+    console.log('1. Circuit Breaker Status: Removed - using direct calls');
 
     // Test 2: Test basic search functionality
     console.log('\n2. Testing Basic Search...');
@@ -35,10 +33,8 @@ async function testCourtListenerTimeoutFix() {
       console.log(`   Expected timeout/error handled: ${error.message}`);
     }
 
-    // Test 4: Check circuit breaker status after tests
-    console.log('\n4. Checking Circuit Breaker After Tests...');
-    const finalBreakerStatus = circuitBreaker.getBreakerStatus('courtlistener');
-    console.log('   Final Circuit Breaker Status:', JSON.stringify(finalBreakerStatus, null, 2));
+    // Test 4: Circuit breaker removed - service uses direct calls
+    console.log('\n4. Circuit Breaker Status: Removed - using direct calls');
 
     // Test 5: Test retry mechanism
     console.log('\n5. Testing Retry Mechanism...');

@@ -1,5 +1,5 @@
 const courtListenerService = require('../services/courtlistener.service');
-const circuitBreaker = require('../services/circuit-breaker.service');
+// Circuit breaker service removed - using direct calls
 
 async function testCourtListenerIntegration() {
   console.log('🧪 Testing CourtListener Integration...\n');
@@ -10,10 +10,8 @@ async function testCourtListenerIntegration() {
     console.log(`   API Key: ${process.env.COURTLISTENER_API_KEY ? 'Configured' : 'Not Configured'}`);
     console.log(`   Base URL: ${courtListenerService.baseURL}`);
 
-    // Test 2: Test circuit breaker status
-    console.log('\n2. Testing Circuit Breaker...');
-    const breakerStatus = circuitBreaker.getBreakerStatus('courtlistener');
-    console.log('   Circuit Breaker Status:', JSON.stringify(breakerStatus, null, 2));
+    // Test 2: Circuit breaker removed - service uses direct calls
+    console.log('\n2. Circuit Breaker Status: Removed - using direct calls');
 
     // Test 3: Test search functionality
     console.log('\n3. Testing Search Functionality...');
