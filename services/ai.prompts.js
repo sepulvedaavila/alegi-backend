@@ -186,19 +186,26 @@ Input Data:
 
 ---
 
-Respond ONLY in this exact JSON format:
+Respond ONLY in this exact JSON format with the exact field names:
 
 {
   "outcome_prediction_score": 0.0,
-  "confidence_prediction_percentage": 0.0,
+  "settlement_probability": 0.0,
+  "case_strength_score": 0.0,
+  "risk_level": "low|medium|high",
+  "prediction_confidence": "low|medium|high",
+  "estimated_timeline": 0,
   "estimated_financial_outcome": 0.0,
-  "financial_outcome_range": {"min": 0.0, "max": 0.0},
   "litigation_cost_estimate": 0.0,
+  "jurisdiction_score": 0.0,
+  "case_type_score": 0.0,
+  "precedent_score": 0.0,
+  "procedural_score": 0.0,
+  "confidence_prediction_percentage": 0.0,
+  "financial_outcome_range": {"min": 0.0, "max": 0.0},
   "litigation_cost_range": {"min": 0.0, "max": 0.0},
-  "settlement_success_rate": 0.0,
   "plaintiff_success": 0.0,
   "appeal_after_trial": 0.0,
-  "case_complexity_score": 0.0,
   "risk_score": 0.0,
   "prior_similar_rulings": [],
   "precedent_cases": [],
