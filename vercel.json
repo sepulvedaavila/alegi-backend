@@ -89,6 +89,10 @@
       "destination": "/api/index.js"
     },
     {
+      "source": "/api/cases/:id",
+      "destination": "/api/index.js"
+    },
+    {
       "source": "/api/cases/:id/updates",
       "destination": "/api/index.js"
     },
@@ -137,6 +141,10 @@
       "destination": "/api/cases/[id]/find-similar.js"
     },
     {
+      "source": "/api/cases/process",
+      "destination": "/api/cases/process.js"
+    },
+    {
       "source": "/api/analytics/case-coverage",
       "destination": "/api/analytics/case-coverage.js"
     },
@@ -149,27 +157,4 @@
       "destination": "/api/index.js"
     }
   ],
-  "headers": [
-    {
-      "source": "/api/(.*)",
-      "headers": [
-        {
-          "key": "Access-Control-Allow-Origin",
-          "value": "https://alegi-frontend.vercel.app"
-        },
-        {
-          "key": "Access-Control-Allow-Methods",
-          "value": "GET, POST, PUT, DELETE, OPTIONS"
-        },
-        {
-          "key": "Access-Control-Allow-Headers",
-          "value": "X-Requested-With, Content-Type, Authorization"
-        },
-        {
-          "key": "Access-Control-Allow-Credentials",
-          "value": "true"
-        }
-      ]
-    }
-  ]
 }
