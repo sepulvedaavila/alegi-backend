@@ -38,7 +38,7 @@ class ServiceInitializer {
 
       // Initialize other services as needed
       this.services.rateLimiter = require('./rateLimiter');
-      this.services.errorHandler = require('../utils/errorHandler');
+      this.services.errorHandler = require('../utils/errorHandler').ErrorHandler;
 
       this.initialized = true;
       console.log('All services initialized successfully');
