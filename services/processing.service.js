@@ -6,6 +6,8 @@ class ProcessingService {
   constructor() {
     this.supabase = null;
     this.initializeSupabase();
+    console.log('[ProcessingService] Instance created');
+    console.log('[ProcessingService] Methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(this)));
   }
 
   initializeSupabase() {
