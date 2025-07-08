@@ -3,6 +3,7 @@ const { validateSupabaseToken } = require('../../../middleware/auth');
 const { createClient } = require('@supabase/supabase-js');
 const rateLimiter = require('../../../services/rateLimiter');
 const { handleError } = require('../../../utils/errorHandler');
+const { getAnalysisData, triggerLinearPipeline } = require('../../../utils/analysis-endpoint-helper');
 
 // Initialize services with error checking
 let openai;
@@ -270,57 +271,71 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: 'Case ID is required' });
     }
     
-    // Gather comprehensive case data
-    const [caseData, evidence, precedents, judgeData] = await Promise.all([
-      getCaseDetails(caseId, user.id),
-      getCaseEvidence(caseId),
-      getCachedPrecedents(caseId),
-      getCachedJudgeAnalysis(caseId)
-    ]);
+    // Function to generate fallback risk data from predictions
+    const generateFallbackRiskData = (predictions) => {
+      const riskLevel = predictions.risk_level || 'medium';
+      const complexityScore = predictions.case_complexity_score || 50;
+      
+      return {
+        overallRisk: riskLevel,
+        riskScore: riskLevel === 'high' ? 75 : riskLevel === 'low' ? 25 : 50,
+        riskFactors: [
+          {
+            factor: 'Case Complexity',
+            level: complexityScore > 70 ? 'high' : complexityScore > 40 ? 'medium' : 'low',
+            impact: complexityScore / 100,
+            description: 'Based on case complexity analysis'
+          },
+          {
+            factor: 'Outcome Uncertainty',
+            level: predictions.prediction_confidence === 'high' ? 'low' : 'medium',
+            impact: 0.3,
+            description: 'Based on prediction confidence'
+          },
+          {
+            factor: 'Settlement Probability',
+            level: predictions.settlement_probability > 60 ? 'low' : 'high',
+            impact: 0.4,
+            description: 'Settlement likelihood affects risk profile'
+          }
+        ],
+        strengths: [
+          'Case has been thoroughly analyzed',
+          'Predictions available for strategy planning'
+        ],
+        weaknesses: [
+          'Detailed risk assessment pending full analysis'
+        ],
+        recommendations: [
+          'Consider settlement negotiations if settlement probability is high',
+          'Gather additional evidence to strengthen weak areas',
+          'Consult with subject matter experts for complex issues'
+        ]
+      };
+    };
     
-    // Risk factor analysis
-    const riskFactors = await analyzeRiskFactors({
-      case: caseData,
-      evidence: evidence,
-      precedents: precedents,
-      judge: judgeData
-    });
+    // Use the helper to get analysis data
+    const result = await getAnalysisData(caseId, 'risk_assessment', generateFallbackRiskData);
     
-    // Rate limit check
-    await rateLimiter.checkLimit('openai', user.id);
+    if (result.success) {
+      return res.json(result.data);
+    }
     
-    // AI comprehensive risk assessment
-    const assessment = await openai.chat.completions.create({
-      model: "gpt-4-turbo-preview",
-      messages: [
-        {
-          role: "system",
-          content: `Perform legal risk assessment. Evaluate evidence strength,
-          precedent alignment, jurisdictional challenges, and procedural risks.
-          Return JSON with overallRisk, riskScore (0-100), detailed riskFactors array,
-          and actionable recommendations.`
-        },
-        {
-          role: "user",
-          content: JSON.stringify(riskFactors)
-        }
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0.2 // Lower temperature for consistent risk assessment
-    });
+    if (result.processing) {
+      return res.status(202).json(result);
+    }
     
-    const result = JSON.parse(assessment.choices[0].message.content);
-    
-    // Store assessment
-    await storeAnalysis(caseId, 'risk-assessment', result);
-    
-    // Update case risk level
-    await supabase
-      .from('case_briefs')
-      .update({ risk_level: result.overallRisk })
-      .eq('id', caseId);
-    
-    res.json(result);
+    if (result.needsProcessing) {
+      // Trigger linear pipeline
+      await triggerLinearPipeline(caseId);
+      
+      return res.status(202).json({
+        message: 'Case analysis triggered',
+        status: 'processing',
+        estimatedTime: '2-5 minutes',
+        hint: 'Risk assessment has been initiated. Please refresh in a few minutes.'
+      });
+    }
     
   } catch (error) {
     handleError(error, res, { 

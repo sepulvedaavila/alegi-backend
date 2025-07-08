@@ -97,29 +97,37 @@ module.exports = async (req, res) => {
       return res.status(404).json({ error: 'Case not found' });
     }
     
-    // Check for existing analysis
-    const { data: existing } = await supabase
-      .from('case_analysis')
-      .select('*')
-      .eq('case_id', caseId)
-      .eq('analysis_type', 'probability')
-      .gte('created_at', new Date(Date.now() - 24*60*60*1000).toISOString())
-      .single();
-    
-    if (existing) {
-      console.log('Returning cached probability analysis');
-      return res.json(existing.result);
-    }
-    
-    // Check if case has been processed
+    // First check case predictions table for processed data
     const { data: casePredictions } = await supabase
       .from('case_predictions')
       .select('*')
       .eq('case_id', caseId)
       .single();
     
-    if (!casePredictions) {
-      console.log(`Case ${caseId} not processed yet, returning pending status`);
+    if (casePredictions) {
+      // Case has been processed, return probability data
+      console.log('Returning probability data from processed case');
+      return res.json({
+        successProbability: casePredictions.outcome_prediction_score || 50,
+        failureProbability: 100 - (casePredictions.outcome_prediction_score || 50),
+        settlementProbability: casePredictions.settlement_probability || 50,
+        confidence: casePredictions.prediction_confidence || 'medium',
+        factors: {
+          jurisdiction: casePredictions.jurisdiction_score || 50,
+          caseType: casePredictions.case_type_score || 50,
+          precedent: casePredictions.precedent_score || 50,
+          proceduralPosture: casePredictions.procedural_score || 50
+        },
+        riskLevel: casePredictions.risk_level,
+        caseStrengthScore: casePredictions.case_strength_score,
+        estimatedTimeline: casePredictions.estimated_timeline,
+        dataSource: 'linear-pipeline'
+      });
+    }
+    
+    // Check if case is being processed
+    if (caseData.processing_status === 'processing') {
+      console.log(`Case ${caseId} is currently being processed`);
       return res.status(202).json({
         message: 'Case analysis is being processed',
         status: 'processing',
@@ -128,93 +136,44 @@ module.exports = async (req, res) => {
       });
     }
     
-    // Rate limit check
-    try {
-      await rateLimiter.checkLimit('openai', user.id);
-    } catch (rateLimitError) {
-      console.error('Rate limit exceeded:', rateLimitError);
-      return res.status(429).json({ 
-        error: 'Rate limit exceeded',
-        message: 'Too many analysis requests. Please try again later.'
-      });
-    }
+    // Case not processed yet - trigger processing
+    console.log(`Case ${caseId} not processed yet, triggering linear pipeline`);
     
-    // Prepare context for AI analysis
-    const [parties, evidence] = await Promise.all([
-      getPartyDetails(caseId),
-      getEvidenceSummary(caseId)
-    ]);
-    
-    const context = {
-      caseType: caseData.case_type,
-      jurisdiction: caseData.jurisdiction,
-      description: caseData.case_description || caseData.case_narrative,
-      stage: caseData.case_stage,
-      parties: parties,
-      evidence: evidence,
-      // Add any available predictions data
-      existingPredictions: casePredictions
-    };
-    
-    console.log('Calling OpenAI for probability analysis');
-    
-    // AI Analysis with timeout
-    const analysisPromise = openai.chat.completions.create({
-      model: "gpt-4-turbo-preview",
-      messages: [
-        {
-          role: "system",
-          content: `You are a legal analyst. Analyze the case and provide probability scores.
-          Return JSON with: successProbability, failureProbability, settlementProbability (all 0-100),
-          confidence (high/medium/low), and factors object with scores for jurisdiction, caseType, precedent, proceduralPosture.`
-        },
-        {
-          role: "user",
-          content: JSON.stringify(context)
-        }
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0.3,
-      max_tokens: 1000
-    });
-    
-    // Add timeout to OpenAI call
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('OpenAI timeout')), 30000)
-    );
-    
-    const completion = await Promise.race([analysisPromise, timeoutPromise]);
-    const analysis = JSON.parse(completion.choices[0].message.content);
-    
-    // Validate AI response
-    if (!analysis.successProbability || !analysis.confidence) {
-      throw new Error('Invalid AI response format');
-    }
-    
-    // Store analysis
-    await supabase
-      .from('case_analysis')
-      .upsert({
-        case_id: caseId,
-        analysis_type: 'probability',
-        result: analysis,
-        confidence_score: analysis.confidence === 'high' ? 0.9 : 
-                         analysis.confidence === 'medium' ? 0.7 : 0.5,
-        factors: analysis.factors,
-        created_at: new Date().toISOString()
-      });
-    
-    // Update case brief
+    // Update status to processing
     await supabase
       .from('case_briefs')
-      .update({
-        success_probability: analysis.successProbability,
+      .update({ 
+        processing_status: 'processing',
         last_ai_update: new Date().toISOString()
       })
       .eq('id', caseId);
     
-    console.log('Probability analysis completed successfully');
-    res.json(analysis);
+    // Import and execute linear pipeline
+    const LinearPipelineService = require('../../../services/linear-pipeline.service');
+    const linearPipeline = new LinearPipelineService();
+    
+    // Execute linear pipeline asynchronously
+    setImmediate(async () => {
+      try {
+        await linearPipeline.executeLinearPipeline(caseId);
+      } catch (error) {
+        console.error(`Linear pipeline failed for case ${caseId}:`, error);
+        await supabase
+          .from('case_briefs')
+          .update({ 
+            processing_status: 'failed',
+            error_message: error.message
+          })
+          .eq('id', caseId);
+      }
+    });
+    
+    return res.status(202).json({
+      message: 'Case analysis triggered',
+      status: 'processing',
+      estimatedTime: '2-5 minutes',
+      hint: 'Analysis has been initiated. Please refresh in a few minutes.'
+    });
     
   } catch (error) {
     console.error('Probability analysis error:', error);

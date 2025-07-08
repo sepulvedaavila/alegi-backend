@@ -299,65 +299,108 @@ module.exports = async (req, res) => {
       jurisdiction: caseData.jurisdiction 
     });
     
-    // Get historical cost data
-    console.log('Calculating historical cost data...');
-    const historicalCosts = await getHistoricalCostData({
-      caseType: caseData.case_type || 'contract_dispute',
-      jurisdiction: caseData.jurisdiction || 'federal',
-      complexity: caseData.complexity_score || 50
-    });
-    console.log('Historical costs calculated:', historicalCosts);
+    // First check if case has been processed and has cost estimate
+    const { data: costAnalysis } = await supabase
+      .from('case_analysis')
+      .select('*')
+      .eq('case_id', caseId)
+      .eq('analysis_type', 'cost_estimate')
+      .single();
     
-    // Calculate base estimates
-    console.log('Calculating base estimates...');
-    const baseEstimates = calculateBaseEstimates(historicalCosts, strategy);
-    console.log('Base estimates calculated:', baseEstimates);
-    
-    // Rate limit check
-    console.log('Checking rate limits...');
-    try {
-      await rateLimiter.checkLimit('openai', user.id);
-      console.log('Rate limit check passed');
-    } catch (rateLimitError) {
-      console.log('Rate limit exceeded, continuing with base estimates');
-      // Continue with base estimates if rate limited
+    if (costAnalysis && costAnalysis.result) {
+      console.log('Returning cost estimate from processed data');
+      const storedEstimate = costAnalysis.result;
+      
+      // Apply strategy adjustments if different from standard
+      let adjustedEstimate = storedEstimate;
+      if (strategy !== 'standard') {
+        const multiplier = strategy === 'aggressive' ? 0.8 : 1.2;
+        adjustedEstimate = {
+          ...storedEstimate,
+          total: {
+            min: Math.round(storedEstimate.total.min * multiplier),
+            avg: Math.round(storedEstimate.total.avg * multiplier),
+            max: Math.round(storedEstimate.total.max * multiplier)
+          },
+          breakdown: Object.fromEntries(
+            Object.entries(storedEstimate.breakdown).map(([key, value]) => 
+              [key, Math.round(value * multiplier)]
+            )
+          )
+        };
+      }
+      
+      // Generate payment schedule from stored data
+      const paymentSchedule = generatePaymentSchedule(
+        adjustedEstimate,
+        caseData.case_stage || 'filing',
+        strategy
+      );
+      
+      return res.json({
+        strategy: strategy,
+        breakdown: adjustedEstimate.breakdown,
+        totalEstimate: adjustedEstimate.total,
+        paymentSchedule: paymentSchedule,
+        confidenceLevel: 'high',
+        assumptions: [
+          'Based on case complexity and jurisdiction',
+          'Includes all phases of litigation',
+          `${strategy} strategy applied`
+        ],
+        dataSource: 'linear-pipeline'
+      });
     }
     
-    // Adjust for case-specific factors
-    console.log('Adjusting estimates with AI...');
-    const adjustedEstimates = await adjustEstimatesWithAI({
-      base: baseEstimates,
-      case: caseData,
-      strategy: strategy,
-      historicalData: historicalCosts
+    // Check if case is being processed
+    if (caseData.processing_status === 'processing') {
+      console.log(`Case ${caseId} is currently being processed`);
+      return res.status(202).json({
+        message: 'Case analysis is being processed',
+        status: 'processing',
+        estimatedTime: '2-5 minutes',
+        hint: 'Please refresh in a few minutes'
+      });
+    }
+    
+    // Case not processed yet - trigger processing
+    console.log(`Case ${caseId} not processed yet, triggering linear pipeline`);
+    
+    // Update status to processing
+    await supabase
+      .from('case_briefs')
+      .update({ 
+        processing_status: 'processing',
+        last_ai_update: new Date().toISOString()
+      })
+      .eq('id', caseId);
+    
+    // Import and execute linear pipeline
+    const LinearPipelineService = require('../../../services/linear-pipeline.service');
+    const linearPipeline = new LinearPipelineService();
+    
+    // Execute linear pipeline asynchronously
+    setImmediate(async () => {
+      try {
+        await linearPipeline.executeLinearPipeline(caseId);
+      } catch (error) {
+        console.error(`Linear pipeline failed for case ${caseId}:`, error);
+        await supabase
+          .from('case_briefs')
+          .update({ 
+            processing_status: 'failed',
+            error_message: error.message
+          })
+          .eq('id', caseId);
+      }
     });
-    console.log('Estimates adjusted:', adjustedEstimates);
     
-    // Generate payment schedule
-    console.log('Generating payment schedule...');
-    console.log('Adjusted estimates structure:', {
-      hasTotal: !!adjustedEstimates.total,
-      totalType: typeof adjustedEstimates.total,
-      totalKeys: adjustedEstimates.total ? Object.keys(adjustedEstimates.total) : 'undefined'
+    return res.status(202).json({
+      message: 'Case analysis triggered',
+      status: 'processing',
+      estimatedTime: '2-5 minutes',
+      hint: 'Cost analysis has been initiated. Please refresh in a few minutes.'
     });
-    const paymentSchedule = generatePaymentSchedule(
-      adjustedEstimates,
-      caseData.case_stage || 'filing',
-      strategy
-    );
-    console.log('Payment schedule generated');
-    
-    const result = {
-      strategy: strategy,
-      breakdown: adjustedEstimates.breakdown,
-      totalEstimate: adjustedEstimates.total,
-      paymentSchedule: paymentSchedule,
-      confidenceLevel: adjustedEstimates.confidence,
-      assumptions: adjustedEstimates.assumptions
-    };
-    
-    console.log('Cost estimate completed successfully');
-    res.json(result);
     
   } catch (error) {
     console.error('Cost estimate error:', error);

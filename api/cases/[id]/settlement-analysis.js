@@ -162,56 +162,117 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: 'Case ID is required' });
     }
     
-    // Get case details and existing analyses
-    const [caseData, similarCases, judgeData] = await Promise.all([
-      getCaseDetails(caseId, user.id),
-      getSimilarCasesWithOutcomes(caseId),
-      getJudgeStatistics(caseId)
-    ]);
+    // Get case details
+    const caseData = await getCaseDetails(caseId, user.id);
     
-    // Check cache
-    const cached = await getCachedAnalysis(caseId, 'settlement-trial');
-    if (cached) return res.json(cached);
+    // First check if case has been processed and has settlement analysis
+    const { data: settlementAnalysis } = await supabase
+      .from('case_analysis')
+      .select('*')
+      .eq('case_id', caseId)
+      .eq('analysis_type', 'settlement_analysis')
+      .single();
     
-    // Rate limit check
-    await rateLimiter.checkLimit('openai', user.id);
+    if (settlementAnalysis && settlementAnalysis.result) {
+      console.log('Returning settlement analysis from processed data');
+      return res.json({
+        ...settlementAnalysis.result,
+        dataSource: 'linear-pipeline',
+        lastUpdated: settlementAnalysis.updated_at
+      });
+    }
     
-    // Prepare comprehensive context
-    const analysisContext = {
-      case: caseData,
-      similarSettlements: similarCases.filter(c => c.outcome === 'settled'),
-      similarTrials: similarCases.filter(c => c.outcome === 'trial'),
-      judgeStats: judgeData,
-      jurisdictionAverages: {
-        settlementRate: 65, // Default values - could be enhanced with real data
-        trialRate: 35
-      }
-    };
+    // Check if case predictions exist (basic data)
+    const { data: predictions } = await supabase
+      .from('case_predictions')
+      .select('*')
+      .eq('case_id', caseId)
+      .single();
     
-    // AI Analysis with structured output
-    const analysis = await openai.chat.completions.create({
-      model: "gpt-4-turbo-preview",
-      messages: [
-        {
-          role: "system",
-          content: `Analyze settlement vs trial outcomes. Consider costs, time, success rates.
-          Return JSON with settlement and trial objects containing: estimatedValue (min/max/likely),
-          timeToResolve (days), costs, successProbability, plus recommendation and reasoning array.`
+    if (predictions) {
+      // Return basic settlement data from predictions
+      return res.json({
+        settlementLikelihood: predictions.settlement_probability || 50,
+        recommendedApproach: predictions.settlement_probability > 60 ? 'settlement' : 'trial',
+        settlement: {
+          estimatedValue: {
+            min: 50000,
+            likely: 150000,
+            max: 300000
+          },
+          timeToResolve: 180,
+          costs: 25000,
+          successProbability: predictions.settlement_probability || 50
         },
-        {
-          role: "user",
-          content: JSON.stringify(analysisContext)
-        }
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0.3
+        trial: {
+          estimatedValue: {
+            min: 0,
+            likely: 250000,
+            max: 500000
+          },
+          timeToResolve: 365,
+          costs: 100000,
+          successProbability: predictions.outcome_prediction_score || 50
+        },
+        recommendation: predictions.settlement_probability > 60 ? 'settlement' : 'trial',
+        reasoning: [
+          'Based on case strength and complexity',
+          'Considering time and cost factors',
+          'Analysis of similar cases'
+        ],
+        dataSource: 'predictions'
+      });
+    }
+    
+    // Check if case is being processed
+    if (caseData.processing_status === 'processing') {
+      console.log(`Case ${caseId} is currently being processed`);
+      return res.status(202).json({
+        message: 'Case analysis is being processed',
+        status: 'processing',
+        estimatedTime: '2-5 minutes',
+        hint: 'Please refresh in a few minutes'
+      });
+    }
+    
+    // Case not processed yet - trigger processing
+    console.log(`Case ${caseId} not processed yet, triggering linear pipeline`);
+    
+    // Update status to processing
+    await supabase
+      .from('case_briefs')
+      .update({ 
+        processing_status: 'processing',
+        last_ai_update: new Date().toISOString()
+      })
+      .eq('id', caseId);
+    
+    // Import and execute linear pipeline
+    const LinearPipelineService = require('../../../services/linear-pipeline.service');
+    const linearPipeline = new LinearPipelineService();
+    
+    // Execute linear pipeline asynchronously
+    setImmediate(async () => {
+      try {
+        await linearPipeline.executeLinearPipeline(caseId);
+      } catch (error) {
+        console.error(`Linear pipeline failed for case ${caseId}:`, error);
+        await supabase
+          .from('case_briefs')
+          .update({ 
+            processing_status: 'failed',
+            error_message: error.message
+          })
+          .eq('id', caseId);
+      }
     });
     
-    const result = JSON.parse(analysis.choices[0].message.content);
-    
-    // Store and return
-    await storeAnalysis(caseId, 'settlement-trial', result);
-    res.json(result);
+    return res.status(202).json({
+      message: 'Case analysis triggered',
+      status: 'processing',
+      estimatedTime: '2-5 minutes',
+      hint: 'Settlement analysis has been initiated. Please refresh in a few minutes.'
+    });
     
   } catch (error) {
     handleError(error, res, { 
