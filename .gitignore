@@ -115,3 +115,8 @@ blueprint.json
 README2.md
 
 enhanced-processing-tables.sql
+QUEUE_SYSTEM.md
+QUEUE_IMPROVEMENTS_SUMMARY.md
+docs/
+examples/
+database-migrations/

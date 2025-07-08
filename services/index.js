@@ -2,6 +2,9 @@
 
 // Export all services from a single entry point
 module.exports = {
+    // Service initializer for centralized service management
+    serviceInitializer: require('./service-initializer'),
+    
     // Core services
     supabaseService: require('./supabase.service'),
     errorTrackingService: require('./error-tracking.service'),

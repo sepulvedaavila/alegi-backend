@@ -3,14 +3,29 @@ const { validateSupabaseToken } = require('../../../middleware/auth');
 const { createClient } = require('@supabase/supabase-js');
 const rateLimiter = require('../../../services/rateLimiter');
 const { handleError } = require('../../../utils/errorHandler');
-const Sentry = require('@sentry/node');
 
-// Initialize services
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
+// Initialize services with error checking
+let openai;
+let supabase;
+
+try {
+  if (process.env.OPENAI_API_KEY) {
+    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  } else {
+    console.error('OpenAI API key not configured');
+  }
+  
+  if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
+    supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_KEY
+    );
+  } else {
+    console.error('Supabase not configured');
+  }
+} catch (error) {
+  console.error('Service initialization error:', error);
+}
 
 // Helper functions
 async function getPartyDetails(caseId) {
@@ -44,19 +59,31 @@ async function getEvidenceSummary(caseId) {
 }
 
 module.exports = async (req, res) => {
-  // Handle CORS preflight requests
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Authorization');
+  
+  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Authorization');
-    res.status(200).end();
-    return;
+    return res.status(200).end();
+  }
+
+  // Check service availability
+  if (!openai || !supabase) {
+    console.error('Required services not available');
+    return res.status(503).json({ 
+      error: 'Service temporarily unavailable',
+      message: 'AI analysis service is not configured. Please try again later.'
+    });
   }
 
   try {
-    // Auth validation
+    // Validate authentication
     const user = await validateSupabaseToken(req);
     const { id: caseId } = req.query;
+    
+    console.log(`Probability analysis requested for case ${caseId} by user ${user.id}`);
     
     if (!caseId) {
       return res.status(400).json({ error: 'Case ID is required' });
@@ -71,10 +98,11 @@ module.exports = async (req, res) => {
       .single();
     
     if (error || !caseData) {
+      console.error('Case not found or access denied:', error);
       return res.status(404).json({ error: 'Case not found' });
     }
     
-    // Check for existing analysis within 24 hours
+    // Check for existing analysis
     const { data: existing } = await supabase
       .from('case_analysis')
       .select('*')
@@ -84,10 +112,11 @@ module.exports = async (req, res) => {
       .single();
     
     if (existing) {
+      console.log('Returning cached probability analysis');
       return res.json(existing.result);
     }
     
-    // Check if case has been processed at all
+    // Check if case has been processed
     const { data: casePredictions } = await supabase
       .from('case_predictions')
       .select('*')
@@ -95,32 +124,27 @@ module.exports = async (req, res) => {
       .single();
     
     if (!casePredictions) {
-      // Case hasn't been processed yet, trigger processing
-      console.log(`Case ${caseId} not processed yet, triggering analysis`);
-      
-      try {
-        const processingService = require('../../../services/processing.service');
-        await processingService.triggerAnalysisForExistingCase(caseId, user.id);
-        
-        // Return a response indicating processing has been triggered
-        return res.status(202).json({
-          message: 'Analysis triggered',
-          status: 'processing',
-          estimatedTime: '2-5 minutes'
-        });
-      } catch (processingError) {
-        console.error('Failed to trigger processing:', processingError);
-        return res.status(500).json({
-          error: 'Failed to trigger analysis',
-          message: 'Please try again in a few minutes'
-        });
-      }
+      console.log(`Case ${caseId} not processed yet, returning pending status`);
+      return res.status(202).json({
+        message: 'Case analysis is being processed',
+        status: 'processing',
+        estimatedTime: '2-5 minutes',
+        hint: 'Please refresh in a few minutes'
+      });
     }
     
     // Rate limit check
-    await rateLimiter.checkLimit('openai', user.id);
+    try {
+      await rateLimiter.checkLimit('openai', user.id);
+    } catch (rateLimitError) {
+      console.error('Rate limit exceeded:', rateLimitError);
+      return res.status(429).json({ 
+        error: 'Rate limit exceeded',
+        message: 'Too many analysis requests. Please try again later.'
+      });
+    }
     
-    // Prepare case context
+    // Prepare context for AI analysis
     const [parties, evidence] = await Promise.all([
       getPartyDetails(caseId),
       getEvidenceSummary(caseId)
@@ -129,14 +153,18 @@ module.exports = async (req, res) => {
     const context = {
       caseType: caseData.case_type,
       jurisdiction: caseData.jurisdiction,
-      description: caseData.case_description,
+      description: caseData.case_description || caseData.case_narrative,
       stage: caseData.case_stage,
       parties: parties,
-      evidence: evidence
+      evidence: evidence,
+      // Add any available predictions data
+      existingPredictions: casePredictions
     };
     
-    // AI Analysis
-    const completion = await openai.chat.completions.create({
+    console.log('Calling OpenAI for probability analysis');
+    
+    // AI Analysis with timeout
+    const analysisPromise = openai.chat.completions.create({
       model: "gpt-4-turbo-preview",
       messages: [
         {
@@ -151,10 +179,22 @@ module.exports = async (req, res) => {
         }
       ],
       response_format: { type: "json_object" },
-      temperature: 0.3
+      temperature: 0.3,
+      max_tokens: 1000
     });
     
+    // Add timeout to OpenAI call
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('OpenAI timeout')), 30000)
+    );
+    
+    const completion = await Promise.race([analysisPromise, timeoutPromise]);
     const analysis = JSON.parse(completion.choices[0].message.content);
+    
+    // Validate AI response
+    if (!analysis.successProbability || !analysis.confidence) {
+      throw new Error('Invalid AI response format');
+    }
     
     // Store analysis
     await supabase
@@ -165,7 +205,8 @@ module.exports = async (req, res) => {
         result: analysis,
         confidence_score: analysis.confidence === 'high' ? 0.9 : 
                          analysis.confidence === 'medium' ? 0.7 : 0.5,
-        factors: analysis.factors
+        factors: analysis.factors,
+        created_at: new Date().toISOString()
       });
     
     // Update case brief
@@ -173,13 +214,15 @@ module.exports = async (req, res) => {
       .from('case_briefs')
       .update({
         success_probability: analysis.successProbability,
-        last_ai_update: new Date()
+        last_ai_update: new Date().toISOString()
       })
       .eq('id', caseId);
     
+    console.log('Probability analysis completed successfully');
     res.json(analysis);
     
   } catch (error) {
+    console.error('Probability analysis error:', error);
     handleError(error, res, { 
       operation: 'probability_analysis',
       caseId: req.query.id 

@@ -1,11 +1,10 @@
-const queueService = require('../services/queue.service');
 const processingService = require('../services/processing.service');
 const notificationService = require('../services/notification.service');
 const Sentry = require('@sentry/node');
 
-// Process case jobs
-queueService.process('case-processing', async (job) => {
-  const { caseId, userId, caseData, webhookType } = job.data;
+// Process case jobs - called by the serverless queue service
+async function process(jobData) {
+  const { caseId, userId, caseData, webhookType } = jobData;
   
   try {
     console.log(`Processing case ${caseId}`);
@@ -36,8 +35,10 @@ queueService.process('case-processing', async (job) => {
     await notificationService.notifyCaseProcessingFailed(caseId, userId, caseData, error);
     
     Sentry.captureException(error, {
-      tags: { caseId, jobId: job.id }
+      tags: { caseId }
     });
     throw error;
   }
-});
+}
+
+module.exports = { process };

@@ -1,10 +1,19 @@
 const { createClient } = require('@supabase/supabase-js');
 
-// Initialize Supabase for cost logging
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
+// Initialize Supabase for cost logging with error handling
+let supabase = null;
+try {
+  if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
+    supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_KEY
+    );
+  } else {
+    console.warn('Supabase credentials not configured - cost logging will be disabled');
+  }
+} catch (error) {
+  console.error('Failed to initialize Supabase client for cost monitoring:', error.message);
+}
 
 class CostMonitor {
   constructor() {
@@ -117,11 +126,14 @@ class CostMonitor {
         timestamp: new Date().toISOString()
       };
 
-      await supabase
-        .from('cost_logs')
-        .insert(costLog);
-
-      console.log(`Cost logged for ${operationName}: $${summary.totalCost} (AI: $${summary.aiCost}, Function: $${summary.functionCost})`);
+      if (supabase) {
+        await supabase
+          .from('cost_logs')
+          .insert(costLog);
+        console.log(`Cost logged for ${operationName}: $${summary.totalCost} (AI: $${summary.aiCost}, Function: $${summary.functionCost})`);
+      } else {
+        console.log(`Cost tracking (no DB): ${operationName}: $${summary.totalCost} (AI: $${summary.aiCost}, Function: $${summary.functionCost})`);
+      }
       
       return costLog;
     } catch (error) {
@@ -133,6 +145,19 @@ class CostMonitor {
   // Get cost trends
   async getCostTrends(days = 7) {
     try {
+      if (!supabase) {
+        console.warn('Supabase not configured - cannot retrieve cost trends');
+        return {
+          totalCost: 0,
+          aiCost: 0,
+          functionCost: 0,
+          totalOperations: 0,
+          averageCostPerOperation: 0,
+          dailyBreakdown: {},
+          message: 'Cost tracking disabled - Supabase not configured'
+        };
+      }
+
       const { data, error } = await supabase
         .from('cost_logs')
         .select('*')

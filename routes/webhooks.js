@@ -32,7 +32,7 @@ router.post('/external/case-briefs', verifyExternalWebhook, async (req, res) => 
     // Only process INSERT and UPDATE operations
     if (type === 'INSERT' || type === 'UPDATE') {
       // Add to processing queue
-      await queueService.add('case-processing', {
+      await queueService.add('case', {
         caseId: record.id,
         userId: record.user_id,
         caseData: record,
@@ -66,7 +66,7 @@ router.post('/supabase/case-created', verifySupabaseWebhook, async (req, res) =>
     });
     
     // Add to processing queue
-    await queueService.add('case-processing', {
+    await queueService.add('case', {
       caseId: record.id,
       userId: record.user_id,
       caseData: record,
@@ -111,7 +111,7 @@ router.post('/supabase/document-uploaded', verifySupabaseWebhook, async (req, re
       console.log(`Enhanced document extraction queued for document ${record.id}`);
     } else {
       // Legacy document processing
-      await queueService.add('document-processing', {
+      await queueService.add('document', {
         documentId: record.id,
         caseId: record.case_id,
         filePath: record.file_path,
@@ -176,7 +176,7 @@ router.post('/universal', async (req, res) => {
     } else if (table === 'case_briefs' && (type === 'INSERT' || type === 'UPDATE')) {
       // Enhanced queue processing with fallback to legacy
       const processingType = record.processing_type || 'enhanced';
-      const queueName = processingType === 'enhanced' ? 'enhanced-case-processing' : 'case-processing';
+      const queueName = processingType === 'enhanced' ? 'enhanced-case' : 'case';
       
       await queueService.add(queueName, {
         caseId: record.id,
@@ -213,7 +213,7 @@ async function handleNewCaseBrief(caseBrief, res) {
 
     // Determine processing type based on case configuration or default to enhanced
     const processingType = caseBrief.processing_type || 'enhanced';
-    const queueName = processingType === 'enhanced' ? 'enhanced-case-processing' : 'case-processing';
+    const queueName = processingType === 'enhanced' ? 'enhanced-case' : 'case';
     
     // Update status to processing
     await supabase

@@ -428,7 +428,7 @@ app.post('/api/cases/:caseId/process', authenticateJWT, async (req, res) => {
     
     // Add to processing queue
     const queueService = require('../services/queue.service');
-    await queueService.add('case-processing', {
+            await queueService.add('case', {
       caseId: caseId,
       userId: req.user.id,
       caseData: caseData,

@@ -439,7 +439,7 @@ class ProcessingService {
       console.log(`No analysis found for case ${caseId}, triggering full processing`);
       
       // Add to processing queue
-      await queueService.add('case-processing', {
+      await queueService.add('case', {
         caseId,
         userId,
         caseData: caseInfo,

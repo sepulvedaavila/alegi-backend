@@ -1,11 +1,10 @@
-const queueService = require('../services/queue.service');
 const enhancedProcessingService = require('../services/enhanced-processing.service');
 const notificationService = require('../services/notification.service');
 const Sentry = require('@sentry/node');
 
-// Process enhanced case jobs
-queueService.process('enhanced-case-processing', async (job) => {
-  const { caseId, userId, caseData, webhookType } = job.data;
+// Process enhanced case jobs - called by the serverless queue service
+async function process(jobData) {
+  const { caseId, userId, caseData, webhookType } = jobData;
   
   try {
     console.log(`Processing enhanced case ${caseId}`);
@@ -36,15 +35,15 @@ queueService.process('enhanced-case-processing', async (job) => {
     await notificationService.notifyEnhancedProcessingFailed(caseId, userId, caseData, error);
     
     Sentry.captureException(error, {
-      tags: { caseId, jobId: job.id, processingType: 'enhanced' }
+      tags: { caseId, processingType: 'enhanced' }
     });
     throw error;
   }
-});
+}
 
 // Process document extraction jobs (for enhanced flow)
-queueService.process('document-extraction', async (job) => {
-  const { caseId, documentId, filePath } = job.data;
+async function processDocumentExtraction(jobData) {
+  const { caseId, documentId, filePath } = jobData;
   
   try {
     console.log(`Processing document extraction for ${documentId} in case ${caseId}`);
@@ -79,15 +78,15 @@ queueService.process('document-extraction', async (job) => {
       .eq('id', documentId);
     
     Sentry.captureException(error, {
-      tags: { caseId, documentId, jobId: job.id, processingType: 'document_extraction' }
+      tags: { caseId, documentId, processingType: 'document_extraction' }
     });
     throw error;
   }
-});
+}
 
 // Process information fusion jobs
-queueService.process('information-fusion', async (job) => {
-  const { caseId, caseData } = job.data;
+async function processInformationFusion(jobData) {
+  const { caseId, caseData } = jobData;
   
   try {
     console.log(`Processing information fusion for case ${caseId}`);
@@ -109,15 +108,15 @@ queueService.process('information-fusion', async (job) => {
     console.error(`Information fusion failed for case ${caseId}:`, error);
     
     Sentry.captureException(error, {
-      tags: { caseId, jobId: job.id, processingType: 'information_fusion' }
+      tags: { caseId, processingType: 'information_fusion' }
     });
     throw error;
   }
-});
+}
 
 // Process external enrichment jobs
-queueService.process('external-enrichment', async (job) => {
-  const { caseId, fusedData } = job.data;
+async function processExternalEnrichment(jobData) {
+  const { caseId, fusedData } = jobData;
   
   try {
     console.log(`Processing external enrichment for case ${caseId}`);
@@ -131,15 +130,15 @@ queueService.process('external-enrichment', async (job) => {
     console.error(`External enrichment failed for case ${caseId}:`, error);
     
     Sentry.captureException(error, {
-      tags: { caseId, jobId: job.id, processingType: 'external_enrichment' }
+      tags: { caseId, processingType: 'external_enrichment' }
     });
     throw error;
   }
-});
+}
 
 // Process staged AI analysis jobs
-queueService.process('staged-ai-analysis', async (job) => {
-  const { caseId, fusedData, externalData } = job.data;
+async function processStagedAIAnalysis(jobData) {
+  const { caseId, fusedData, externalData } = jobData;
   
   try {
     console.log(`Processing staged AI analysis for case ${caseId}`);
@@ -153,13 +152,18 @@ queueService.process('staged-ai-analysis', async (job) => {
     console.error(`Staged AI analysis failed for case ${caseId}:`, error);
     
     Sentry.captureException(error, {
-      tags: { caseId, jobId: job.id, processingType: 'staged_ai_analysis' }
+      tags: { caseId, processingType: 'staged_ai_analysis' }
     });
     throw error;
   }
-});
+}
 
 module.exports = {
+  process,
+  processDocumentExtraction,
+  processInformationFusion,
+  processExternalEnrichment,
+  processStagedAIAnalysis,
   // Export for testing purposes
   enhancedProcessingService
 }; 

@@ -1,9 +1,10 @@
-const queueService = require('../services/queue.service');
 const pdfcoService = require('../services/pdfco.service');
 const supabaseService = require('../services/supabase.service');
+const queueService = require('../services/queue.service');
 
-queueService.process('document-processing', async (job) => {
-  const { documentId, caseId, filePath } = job.data;
+// Process document jobs - called by the serverless queue service
+async function process(jobData) {
+  const { documentId, caseId, filePath } = jobData;
   
   try {
     console.log(`Processing document ${documentId} for case ${caseId}`);
@@ -28,7 +29,7 @@ queueService.process('document-processing', async (job) => {
       .eq('id', documentId);
       
     // Trigger case reprocessing with new document
-    await queueService.add('case-processing', {
+    await queueService.add('case', {
       caseId,
       webhookType: 'document_added',
       documentId
@@ -39,4 +40,6 @@ queueService.process('document-processing', async (job) => {
     console.error(`Document processing failed:`, error);
     throw error;
   }
-});
+}
+
+module.exports = { process };

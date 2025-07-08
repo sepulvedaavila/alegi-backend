@@ -3,10 +3,21 @@ const { createClient } = require('@supabase/supabase-js');
 const internalAPIService = require('../../../services/internal-api.service');
 const { handleError } = require('../../../utils/errorHandler');
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
+// Initialize services with error checking
+let supabase;
+
+try {
+  if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
+    supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_KEY
+    );
+  } else {
+    console.error('Supabase not configured');
+  }
+} catch (error) {
+  console.error('Service initialization error:', error);
+}
 
 async function getCaseDetails(caseId, userId) {
   const { data, error } = await supabase
@@ -24,6 +35,25 @@ async function getCaseDetails(caseId, userId) {
 }
 
 module.exports = async (req, res) => {
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Authorization');
+  
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  // Check service availability
+  if (!supabase) {
+    console.error('Required services not available');
+    return res.status(503).json({ 
+      error: 'Service temporarily unavailable',
+      message: 'Database service is not configured. Please try again later.'
+    });
+  }
+
   try {
     const user = await validateSupabaseToken(req);
     const { id: caseId } = req.query;

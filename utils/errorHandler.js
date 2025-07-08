@@ -1,69 +1,87 @@
 const Sentry = require('@sentry/node');
 
-function handleError(error, res, context = {}) {
-  console.error('API Error:', error);
-  
-  // Capture in Sentry with context
-  Sentry.captureException(error, {
-    extra: context,
-    tags: {
-      api_version: '1.0',
-      environment: process.env.NODE_ENV
-    }
+class APIError extends Error {
+  constructor(message, statusCode = 500) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
+
+class UnauthorizedError extends APIError {
+  constructor(message = 'Unauthorized') {
+    super(message, 401);
+  }
+}
+
+class NotFoundError extends APIError {
+  constructor(message = 'Not found') {
+    super(message, 404);
+  }
+}
+
+class ValidationError extends APIError {
+  constructor(message = 'Validation failed') {
+    super(message, 400);
+  }
+}
+
+class RateLimitError extends APIError {
+  constructor(message = 'Rate limit exceeded') {
+    super(message, 429);
+  }
+}
+
+const handleError = (error, res, context = {}) => {
+  // Log error details
+  console.error('API Error:', {
+    message: error.message,
+    stack: error.stack,
+    context
   });
-  
-  // Determine status code
-  let statusCode = 500;
-  let message = 'Internal server error';
-  
-  if (error.name === 'ValidationError') {
-    statusCode = 400;
-    message = 'Invalid request data';
-  } else if (error.name === 'UnauthorizedError') {
-    statusCode = 401;
-    message = 'Unauthorized';
-  } else if (error.name === 'NotFoundError') {
-    statusCode = 404;
-    message = 'Resource not found';
-  } else if (error.message?.includes('Rate limit')) {
-    statusCode = 429;
-    message = error.message;
+
+  // Report to Sentry if configured
+  if (process.env.SENTRY_DSN) {
+    Sentry.captureException(error, {
+      tags: context,
+      level: 'error'
+    });
   }
-  
-  res.status(statusCode).json({
-    error: message,
-    ...(process.env.NODE_ENV === 'development' && {
-      stack: error.stack,
-      details: error.message
-    })
+
+  // Send appropriate response
+  if (error instanceof APIError) {
+    return res.status(error.statusCode).json({
+      error: error.message,
+      type: error.constructor.name
+    });
+  }
+
+  // Handle specific errors
+  if (error.message?.includes('Rate limit')) {
+    return res.status(429).json({
+      error: 'Rate limit exceeded',
+      message: 'Too many requests. Please try again later.'
+    });
+  }
+
+  if (error.message?.includes('Network')) {
+    return res.status(503).json({
+      error: 'Service unavailable',
+      message: 'External service is temporarily unavailable.'
+    });
+  }
+
+  // Default error response
+  res.status(500).json({
+    error: 'Internal server error',
+    message: process.env.NODE_ENV === 'development' ? error.message : 'An unexpected error occurred'
   });
-}
+};
 
-// Custom error classes
-class ValidationError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = 'ValidationError';
-  }
-}
-
-class UnauthorizedError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = 'UnauthorizedError';
-  }
-}
-
-class NotFoundError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = 'NotFoundError';
-  }
-}
-
-module.exports = { 
-  handleError, 
-  ValidationError, 
-  UnauthorizedError, 
-  NotFoundError 
+module.exports = {
+  APIError,
+  UnauthorizedError,
+  NotFoundError,
+  ValidationError,
+  RateLimitError,
+  handleError
 }; 

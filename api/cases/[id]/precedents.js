@@ -6,12 +6,28 @@ const { handleError } = require('../../../utils/errorHandler');
 const courtListenerService = require('../../../services/courtlistener.service');
 const { mapToCourtListenerCourt } = require('../../../utils/courtMaps');
 
-// Initialize services
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
+// Initialize services with error checking
+let openai;
+let supabase;
+
+try {
+  if (process.env.OPENAI_API_KEY) {
+    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  } else {
+    console.error('OpenAI API key not configured');
+  }
+  
+  if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
+    supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_KEY
+    );
+  } else {
+    console.error('Supabase not configured');
+  }
+} catch (error) {
+  console.error('Service initialization error:', error);
+}
 
 // Helper functions
 async function getCaseDetails(caseId, userId) {
@@ -134,13 +150,23 @@ async function analyzePrecedentRelevance(courtListenerResults, caseData) {
 }
 
 module.exports = async (req, res) => {
-  // Handle CORS preflight requests
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Authorization');
+  
+  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Authorization');
-    res.status(200).end();
-    return;
+    return res.status(200).end();
+  }
+
+  // Check service availability
+  if (!openai || !supabase) {
+    console.error('Required services not available');
+    return res.status(503).json({ 
+      error: 'Service temporarily unavailable',
+      message: 'AI analysis service is not configured. Please try again later.'
+    });
   }
 
   try {

@@ -1,16 +1,23 @@
 const { createClient } = require('@supabase/supabase-js');
 const { UnauthorizedError } = require('../utils/errorHandler');
 
-// Initialize Supabase client
+// Initialize Supabase client with error handling
 let supabase;
 try {
   if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
     supabase = createClient(
       process.env.SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_KEY
+      process.env.SUPABASE_SERVICE_KEY,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false
+        }
+      }
     );
+    console.log('Supabase client initialized successfully');
   } else {
-    console.warn('Supabase not configured - authentication will fail');
+    console.error('Missing Supabase configuration - auth will fail');
   }
 } catch (error) {
   console.error('Failed to initialize Supabase for auth:', error);
@@ -20,27 +27,39 @@ const validateSupabaseToken = async (req) => {
   const authHeader = req.headers.authorization;
   
   if (!authHeader) {
+    console.error('No authorization header provided');
     throw new UnauthorizedError('No authorization header');
   }
 
   const token = authHeader.split(' ')[1];
   
   if (!token) {
+    console.error('No token in authorization header');
     throw new UnauthorizedError('No token provided');
   }
   
   if (!supabase) {
+    console.error('Supabase client not initialized');
     throw new UnauthorizedError('Authentication service not available');
   }
   
   try {
+    // Log token info for debugging (remove in production)
+    console.log('Validating token:', token.substring(0, 20) + '...');
+    
     const { data, error } = await supabase.auth.getUser(token);
-    if (error) throw error;
+    
+    if (error) {
+      console.error('Supabase auth error:', error.message);
+      throw error;
+    }
     
     if (!data.user) {
+      console.error('No user data returned from Supabase');
       throw new UnauthorizedError('Invalid token');
     }
     
+    console.log('Token validated for user:', data.user.id);
     return data.user;
   } catch (error) {
     console.error('Token validation error:', error);
