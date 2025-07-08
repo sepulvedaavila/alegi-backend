@@ -389,6 +389,108 @@ app.get('/api/cases/:caseId', authenticateJWT, async (req, res) => {
   }
 });
 
+// Comprehensive case view endpoint - Frontend should use this for CaseView
+app.get('/api/cases/:caseId/view', authenticateJWT, async (req, res) => {
+  try {
+    const { caseId } = req.params;
+    
+    // Fetch all case data in parallel for better performance
+    const [
+      caseResult,
+      plaintiffsResult,
+      defendantsResult,
+      attorneysResult,
+      legalIssuesResult,
+      evidenceResult,
+      documentsResult,
+      enrichmentResult,
+      predictionsResult,
+      analysisResult
+    ] = await Promise.allSettled([
+      // Basic case data
+      supabase.from('case_briefs').select('*').eq('id', caseId).single(),
+      // Related parties
+      supabase.from('case_plaintiffs').select('*').eq('case_id', caseId),
+      supabase.from('case_defendants').select('*').eq('case_id', caseId),
+      supabase.from('case_attorneys').select('*').eq('case_id', caseId),
+      supabase.from('case_legal_issues').select('*').eq('case_id', caseId),
+      // Case files
+      supabase.from('case_evidence').select('*').eq('case_id', caseId),
+      supabase.from('case_documents').select('*').eq('case_id', caseId),
+      // AI results (if available)
+      supabase.from('case_ai_enrichment').select('*').eq('case_id', caseId).single(),
+      supabase.from('case_predictions').select('*').eq('case_id', caseId).single(),
+      supabase.from('case_analysis').select('*').eq('case_id', caseId)
+    ]);
+    
+    // Check if case exists
+    if (caseResult.status === 'rejected' || !caseResult.value.data) {
+      return res.status(404).json({ error: 'Case not found' });
+    }
+    
+    const caseData = caseResult.value.data;
+    
+    // Organize analysis results by type
+    const analysisMap = {};
+    if (analysisResult.status === 'fulfilled' && analysisResult.value.data) {
+      analysisResult.value.data.forEach(result => {
+        analysisMap[result.analysis_type] = result.result;
+      });
+    }
+    
+    // Build comprehensive response
+    const response = {
+      // Basic case information
+      case: caseData,
+      
+      // Related parties
+      plaintiffs: plaintiffsResult.status === 'fulfilled' ? plaintiffsResult.value.data || [] : [],
+      defendants: defendantsResult.status === 'fulfilled' ? defendantsResult.value.data || [] : [],
+      attorneys: attorneysResult.status === 'fulfilled' ? attorneysResult.value.data || [] : [],
+      legalIssues: legalIssuesResult.status === 'fulfilled' ? legalIssuesResult.value.data || [] : [],
+      
+      // Case files
+      evidence: evidenceResult.status === 'fulfilled' ? evidenceResult.value.data || [] : [],
+      documents: documentsResult.status === 'fulfilled' ? documentsResult.value.data || [] : [],
+      
+      // AI analysis (if available)
+      aiData: {
+        enrichment: enrichmentResult.status === 'fulfilled' ? enrichmentResult.value.data : null,
+        predictions: predictionsResult.status === 'fulfilled' ? predictionsResult.value.data : null,
+        analysis: analysisMap
+      },
+      
+      // Processing status
+      status: {
+        processingStatus: caseData.processing_status || 'not_started',
+        aiProcessed: caseData.ai_processed || false,
+        lastAiUpdate: caseData.last_ai_update,
+        hasAiData: !!(
+          (enrichmentResult.status === 'fulfilled' && enrichmentResult.value.data) ||
+          (predictionsResult.status === 'fulfilled' && predictionsResult.value.data) ||
+          Object.keys(analysisMap).length > 0
+        )
+      },
+      
+      // Metadata
+      metadata: {
+        caseId: caseId,
+        fetchedAt: new Date().toISOString()
+      }
+    };
+    
+    res.json(response);
+    
+  } catch (error) {
+    console.error('Case view data fetch error:', error);
+    res.status(500).json({
+      error: 'Failed to fetch case view data',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // Comprehensive case data endpoint - Frontend should use this
 app.get('/api/cases/:caseId/data', authenticateJWT, async (req, res) => {
   try {

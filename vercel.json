@@ -93,6 +93,10 @@
       "destination": "/api/index.js"
     },
     {
+      "source": "/api/cases/:id/view",
+      "destination": "/api/index.js"
+    },
+    {
       "source": "/api/cases/:id/updates",
       "destination": "/api/index.js"
     },
