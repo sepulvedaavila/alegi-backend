@@ -3,7 +3,7 @@ const { validateSupabaseToken } = require('../../../middleware/auth');
 const { createClient } = require('@supabase/supabase-js');
 const rateLimiter = require('../../../services/rateLimiter');
 const { handleError } = require('../../../utils/errorHandler');
-const courtListenerService = require('../../../services/courtlistener.service');
+const { applyCorsHeaders } = require('../../../utils/cors-helper');const courtListenerService = require('../../../services/courtlistener.service');
 const { mapToCourtListenerCourt } = require('../../../utils/courtMaps');
 
 // Initialize services with error checking
@@ -208,9 +208,9 @@ async function analyzeJudicialPatterns(opinions, caseType) {
 }
 
 module.exports = async (req, res) => {
-  // Handle CORS preflight - Vercel handles the CORS headers
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+  // Apply CORS headers
+  if (applyCorsHeaders(req, res)) {
+    return; // Request was handled (OPTIONS)
   }
 
   // Check service availability

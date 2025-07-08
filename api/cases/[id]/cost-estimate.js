@@ -3,7 +3,7 @@ const { validateInternalServiceCall } = require('../../../middleware/auth');
 const { createClient } = require('@supabase/supabase-js');
 const rateLimiter = require('../../../services/rateLimiter');
 const { handleError } = require('../../../utils/errorHandler');
-
+const { applyCorsHeaders } = require('../../../utils/cors-helper');
 // Initialize services with better error checking
 let openai;
 let supabase;
@@ -271,9 +271,9 @@ function generatePaymentSchedule(estimates, currentStage, strategy) {
 module.exports = async (req, res) => {
   console.log('Cost estimate endpoint called');
   
-  // Handle CORS preflight - Vercel handles the CORS headers
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+  // Apply CORS headers
+  if (applyCorsHeaders(req, res)) {
+    return; // Request was handled (OPTIONS)
   }
 
   try {

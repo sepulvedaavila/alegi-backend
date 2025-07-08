@@ -122,3 +122,4 @@ examples/
 database-migrations/
 
 LINEAR_ARCHITECTURE.md
+scripts/update-cors.sh

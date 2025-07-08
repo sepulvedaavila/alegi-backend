@@ -1,7 +1,7 @@
 const { validateSupabaseToken } = require('../../../middleware/auth');
 const { createClient } = require('@supabase/supabase-js');
 const { handleError } = require('../../../utils/errorHandler');
-
+const { applyCorsHeaders } = require('../../../utils/cors-helper');
 // Initialize services with error checking
 let supabase;
 
@@ -252,9 +252,9 @@ async function cacheAnalysis(caseId, analysisType, result, days = 3) {
 }
 
 module.exports = async (req, res) => {
-  // Handle CORS preflight - Vercel handles the CORS headers
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+  // Apply CORS headers
+  if (applyCorsHeaders(req, res)) {
+    return; // Request was handled (OPTIONS)
   }
 
   // Check service availability

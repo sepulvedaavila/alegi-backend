@@ -1,6 +1,12 @@
 const { createClient } = require('@supabase/supabase-js');
+const { applyCorsHeaders } = require('../utils/cors-helper');
 
 module.exports = async (req, res) => {
+  // Apply CORS headers
+  if (applyCorsHeaders(req, res)) {
+    return; // Request was handled (OPTIONS)
+  }
+  
   const startTime = Date.now();
   
   try {

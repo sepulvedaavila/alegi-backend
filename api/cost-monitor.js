@@ -1,7 +1,12 @@
 const { costMonitor } = require('../services');
 const { validateSupabaseToken } = require('../middleware/auth');
+const { applyCorsHeaders } = require('../utils/cors-helper');
 
 module.exports = async (req, res) => {
+  // Apply CORS headers
+  if (applyCorsHeaders(req, res)) {
+    return; // Request was handled (OPTIONS)
+  }
   try {
     // Validate user authentication
     const user = await validateSupabaseToken(req);

@@ -3,7 +3,7 @@ const { validateSupabaseToken } = require('../../../middleware/auth');
 const { createClient } = require('@supabase/supabase-js');
 const rateLimiter = require('../../../services/rateLimiter');
 const { handleError } = require('../../../utils/errorHandler');
-const { getAnalysisData, triggerLinearPipeline } = require('../../../utils/analysis-endpoint-helper');
+const { applyCorsHeaders } = require('../../../utils/cors-helper');const { getAnalysisData, triggerLinearPipeline } = require('../../../utils/analysis-endpoint-helper');
 
 // Initialize services with error checking
 let openai;
@@ -249,9 +249,9 @@ async function storeAnalysis(caseId, analysisType, result) {
 }
 
 module.exports = async (req, res) => {
-  // Handle CORS preflight - Vercel handles the CORS headers
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+  // Apply CORS headers
+  if (applyCorsHeaders(req, res)) {
+    return; // Request was handled (OPTIONS)
   }
 
   // Check service availability

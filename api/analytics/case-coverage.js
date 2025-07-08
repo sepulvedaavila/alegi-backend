@@ -1,6 +1,7 @@
 const { optionalAuth } = require('../../middleware/auth');
 const { createClient } = require('@supabase/supabase-js');
 const { handleError } = require('../../utils/errorHandler');
+const { applyCorsHeaders } = require('../../utils/cors-helper');
 
 // Initialize services
 const supabase = createClient(
@@ -204,6 +205,11 @@ async function updateAnalyzedCasesMetadata() {
 }
 
 module.exports = async (req, res) => {
+  // Apply CORS headers
+  if (applyCorsHeaders(req, res)) {
+    return; // Request was handled (OPTIONS)
+  }
+  
   try {
     // This endpoint can be public or require minimal auth
     const { data: metadata } = await supabase

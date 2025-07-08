@@ -1,6 +1,7 @@
 // api/cases/process.js
 const { createClient } = require('@supabase/supabase-js');
 const LinearPipelineService = require('../../services/linear-pipeline.service');
+const { applyCorsHeaders } = require('../../utils/cors-helper');
 
 // Initialize Supabase client
 const supabase = process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY 
@@ -17,6 +18,11 @@ const supabase = process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY
 const linearPipelineService = new LinearPipelineService();
 
 module.exports = async function handler(req, res) {
+  // Apply CORS headers
+  if (applyCorsHeaders(req, res)) {
+    return; // Request was handled (OPTIONS)
+  }
+  
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }

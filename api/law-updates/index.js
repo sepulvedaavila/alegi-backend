@@ -3,6 +3,7 @@ const { validateSupabaseToken } = require('../../middleware/auth');
 const { createClient } = require('@supabase/supabase-js');
 const rateLimiter = require('../../services/rateLimiter');
 const { handleError } = require('../../utils/errorHandler');
+const { applyCorsHeaders } = require('../../utils/cors-helper');
 
 // Initialize services
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -247,6 +248,11 @@ async function analyzePendingUpdates() {
 }
 
 module.exports = async (req, res) => {
+  // Apply CORS headers
+  if (applyCorsHeaders(req, res)) {
+    return; // Request was handled (OPTIONS)
+  }
+  
   try {
     const user = await validateSupabaseToken(req);
     const {
