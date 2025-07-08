@@ -1,4 +1,3 @@
-const serviceInitializer = require('../services/service-initializer');
 const { createClient } = require('@supabase/supabase-js');
 
 module.exports = async (req, res) => {
