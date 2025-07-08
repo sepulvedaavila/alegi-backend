@@ -190,14 +190,14 @@ class AIService {
   }
 
   // Step 1: Legal Case Intake Analysis
-  async analyzeCaseIntake(caseData, evidence, documentContent) {
+  async executeIntakeAnalysis(caseData, evidenceData, documentContent) {
     try {
       const { model, temperature, prompt } = AI_PROMPTS.INTAKE_ANALYSIS;
       
       console.log(`Making OpenAI API call for case intake analysis: ${caseData.id}`);
       const response = await this.makeOpenAICall(model, [{
         role: 'user',
-        content: prompt(caseData, evidence, documentContent)
+        content: prompt(caseData, evidenceData, documentContent)
       }], {
         temperature,
         response_format: { type: 'json_object' }
@@ -215,33 +215,38 @@ class AIService {
     } catch (error) {
       console.error('Case intake analysis error:', error.message);
       Sentry.captureException(error, {
-        tags: { service: 'ai', operation: 'analyzeCaseIntake' },
+        tags: { service: 'ai', operation: 'executeIntakeAnalysis' },
         extra: { caseId: caseData.id }
       });
       
       // Return fallback response if OpenAI fails
       return {
-        case_summary: 'AI analysis temporarily unavailable - manual review required',
-        key_facts: ['Unable to extract facts automatically'],
-        legal_issues: ['Legal issues require manual analysis'],
-        parties: { plaintiffs: ['Unknown'], defendants: ['Unknown'] },
-        claims: ['Claims require manual review'],
-        relief_sought: 'Relief sought requires manual analysis',
-        case_strength_indicators: ['Manual assessment needed'],
-        potential_challenges: ['Challenges require manual review'],
+        case_metadata: {
+          case_type: ['Unknown'],
+          case_stage: 'Unknown',
+          date_filed: null,
+          applicable_law: ['Unknown'],
+          issue: ['Unknown']
+        },
+        case_evidence: {
+          ai_extracted_text: 'AI analysis temporarily unavailable - manual review required'
+        },
+        case_documents: {
+          ai_extracted_text: 'AI analysis temporarily unavailable - manual review required'
+        },
         error: error.message
       };
     }
   }
 
   // Step 2: Jurisdiction Analysis
-  async analyzeJurisdiction(caseData, intakeAnalysis) {
+  async executeJurisdictionAnalysis(caseData, intakeResults) {
     try {
       const { model, temperature, prompt } = AI_PROMPTS.JURISDICTION_ANALYSIS;
       
       const response = await this.makeOpenAICall(model, [{
         role: 'user',
-        content: prompt(caseData, intakeAnalysis)
+        content: prompt(caseData, intakeResults)
       }], {
         temperature,
         response_format: { type: 'json_object' }
@@ -254,7 +259,7 @@ class AIService {
     } catch (error) {
       console.error('Jurisdiction analysis error:', error);
       Sentry.captureException(error, {
-        tags: { service: 'ai', operation: 'analyzeJurisdiction' },
+        tags: { service: 'ai', operation: 'executeJurisdictionAnalysis' },
         extra: { caseId: caseData.id }
       });
       throw error;
@@ -262,13 +267,13 @@ class AIService {
   }
 
   // Step 3: Case Enhancement with CourtListener data
-  async enhanceCaseDetails(caseData, intakeAnalysis, jurisdiction, courtListenerCases) {
+  async executeCaseEnhancement(caseData, intakeResults, jurisdiction, documentContent) {
     try {
       const { model, temperature, prompt } = AI_PROMPTS.CASE_ENHANCEMENT;
       
       const response = await this.makeOpenAICall(model, [{
         role: 'user',
-        content: prompt(caseData, intakeAnalysis, jurisdiction, courtListenerCases)
+        content: prompt(caseData, intakeResults, jurisdiction, documentContent)
       }], {
         temperature,
         response_format: { type: 'json_object' }
@@ -284,7 +289,7 @@ class AIService {
     } catch (error) {
       console.error('Case enhancement error:', error);
       Sentry.captureException(error, {
-        tags: { service: 'ai', operation: 'enhanceCase' },
+        tags: { service: 'ai', operation: 'executeCaseEnhancement' },
         extra: { caseId: caseData.id }
       });
       throw error;
@@ -292,40 +297,66 @@ class AIService {
   }
 
   // Step 4: Case Complexity Scoring
-  async calculateComplexity(caseData, enhancement, evidence) {
+  async executeComplexityScore(caseData, enhancement, precedentSummary) {
     try {
-      const { model, temperature, prompt } = AI_PROMPTS.COMPLEXITY_CALCULATION;
+      const { model, temperature, prompt } = AI_PROMPTS.COMPLEXITY_SCORE;
       
       const response = await this.makeOpenAICall(model, [{
         role: 'user',
-        content: prompt(caseData, enhancement, evidence)
+        content: prompt(caseData, enhancement, precedentSummary)
       }], {
-        temperature
+        temperature,
+        response_format: { type: 'json_object' }
       });
 
-      const complexityText = response.choices[0].message.content.trim();
-      const complexityScore = parseInt(complexityText.match(/\d+/)?.[0] || '50');
-      console.log('Complexity calculation completed:', complexityScore);
+      const result = JSON.parse(response.choices[0].message.content);
+      console.log('Complexity calculation completed:', result.case_complexity_score);
       
-      return Math.min(Math.max(complexityScore, 0), 100);
+      return result.case_complexity_score;
     } catch (error) {
       console.error('Complexity calculation error:', error);
       Sentry.captureException(error, {
-        tags: { service: 'ai', operation: 'calculateComplexity' },
+        tags: { service: 'ai', operation: 'executeComplexityScore' },
         extra: { caseId: caseData.id }
       });
       throw error;
     }
   }
 
-  // Step 5: Legal Prediction
-  async generateLegalPrediction(enhancement, caseData, complexityScore, courtListenerCases) {
+  // Step 5: Court Opinion Analysis
+  async executeCourtOpinionAnalysis(opinionText) {
     try {
-      const { model, temperature, prompt } = AI_PROMPTS.LEGAL_PREDICTION;
+      const { model, temperature, prompt } = AI_PROMPTS.COURT_OPINION_ANALYSIS;
       
       const response = await this.makeOpenAICall(model, [{
         role: 'user',
-        content: prompt(enhancement, caseData, complexityScore, courtListenerCases)
+        content: prompt(opinionText)
+      }], {
+        temperature,
+        response_format: { type: 'json_object' }
+      });
+
+      const result = JSON.parse(response.choices[0].message.content);
+      console.log('Court opinion analysis completed');
+      
+      return result;
+    } catch (error) {
+      console.error('Court opinion analysis error:', error);
+      Sentry.captureException(error, {
+        tags: { service: 'ai', operation: 'executeCourtOpinionAnalysis' }
+      });
+      throw error;
+    }
+  }
+
+  // Step 6: Legal Prediction
+  async executePredictionAnalysis(data) {
+    try {
+      const { model, temperature, prompt } = AI_PROMPTS.PREDICTION_ANALYSIS;
+      
+      const response = await this.makeOpenAICall(model, [{
+        role: 'user',
+        content: prompt(data)
       }], {
         temperature,
         response_format: { type: 'json_object' }
@@ -333,7 +364,6 @@ class AIService {
 
       const result = JSON.parse(response.choices[0].message.content);
       console.log('Legal prediction generated:', { 
-        caseId: caseData.id,
         outcomeScore: result.outcome_prediction_score 
       });
       
@@ -341,8 +371,7 @@ class AIService {
     } catch (error) {
       console.error('Legal prediction error:', error);
       Sentry.captureException(error, {
-        tags: { service: 'ai', operation: 'generateLegalPrediction' },
-        extra: { caseId: caseData.id }
+        tags: { service: 'ai', operation: 'executePredictionAnalysis' }
       });
       throw error;
     }

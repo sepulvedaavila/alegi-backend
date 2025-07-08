@@ -2,136 +2,222 @@ module.exports.AI_PROMPTS = {
   INTAKE_ANALYSIS: {
     model: 'gpt-4-turbo-preview',
     temperature: 0.3,
-    prompt: (caseData, evidence, documentContent) => `
-      Analyze this legal case and extract key information:
-      
-      Case Information:
-      ${JSON.stringify(caseData, null, 2)}
-      
-      Evidence:
-      ${JSON.stringify(evidence, null, 2)}
-      
-      Document Content:
-      ${documentContent}
-      
-      Please provide a JSON response with:
-      {
-        "case_summary": "Brief summary of the case",
-        "key_facts": ["fact1", "fact2"],
-        "legal_issues": ["issue1", "issue2"],
-        "parties": {
-          "plaintiffs": ["name1"],
-          "defendants": ["name1"]
-        },
-        "claims": ["claim1", "claim2"],
-        "relief_sought": "Description of relief",
-        "case_strength_indicators": ["indicator1"],
-        "potential_challenges": ["challenge1"]
-      }
-    `
+    prompt: (caseData, evidenceData, documentContent) => `You are an AI legal analyst. Based on the user's responses to a legal case intake form, analyze and extract the following structured information.
+
+Instructions:
+- Respond ONLY in the exact JSON format shown below.
+- Date filed can be year, month, day, or only month and year or only year, use the dates from the case description.
+- Use null if a field is unknown or not clearly specified. (including the response for date_filed)
+- Keep text concise and objective.
+- Always use arrays for list fields, even if empty.
+- Analyze both the user-submitted narrative and uploaded document content.
+-Summarize the document and extract key legal and factual details relevant to a civil case, be sure to add the conditions and agreements from the document, DON'T LEAVE ANY KEY DETAIL OUT. Keep it short and structured.
+- Specific case type(s)
+- What stage is the case
+- when was the case filed
+- Applicable law, statutes, ordinances, or rules, list in order of importance to the  case
+- Specific legal issues
+- a brief detailed description of evidence and the strength of each evidence. 
+- a brief of the key points from the documents
+
+The form responses are:
+
+Location: ${caseData.jurisdiction}
+
+Case Description (What happened): ${caseData.case_narrative}
+
+Desired Outcome: ${caseData.expected_outcome}
+
+Supporting Evidence Description: ${(evidenceData || []).map(e => `${e.evidence_type}, ${e.description}`).join('; ')}
+
+Additional Notes: ${caseData.additional_notes || 'None'}
+
+Uploaded Document Content: ${documentContent || 'None'}
+
+---
+
+Respond ONLY in this exact JSON format (with these 3 nested keys):
+
+{
+  "case_metadata": {
+    "case_type": ["..."],
+    "case_stage": "...",
+    "date_filed": "...",
+    "applicable_law": ["..."],
+    "issue": ["..."]
   },
-  
+  "case_evidence": {
+    "ai_extracted_text": "..."
+  },
+  "case_documents": {
+    "ai_extracted_text": "..."
+  }
+}`
+  },
+
   JURISDICTION_ANALYSIS: {
     model: 'gpt-4-turbo-preview',
     temperature: 0.2,
-    prompt: (caseData, intakeAnalysis) => `
-      Determine the appropriate jurisdiction and court for this case:
-      
-      Case Data: ${JSON.stringify(caseData)}
-      Initial Analysis: ${JSON.stringify(intakeAnalysis)}
-      
-      Return JSON with:
-      {
-        "recommended_jurisdiction": "Federal/State",
-        "recommended_court": "Court name",
-        "court_abbreviation": "Court abbreviation",
-        "jurisdiction_basis": "Explanation",
-        "venue_considerations": ["consideration1"],
-        "alternative_jurisdictions": ["jurisdiction1"]
-      }
-    `
+    prompt: (caseData, intakeResults) => `You are an AI legal assistant trained in U.S. civil procedure.
+
+Your task is to analyze the details of a potential legal case and determine the most appropriate court jurisdiction that satisfies all four conditions:
+
+1. Personal jurisdiction over the parties involved  
+2. Subject matter jurisdiction for the type of legal dispute  
+3. Geographic proximity based on the provided state and city
+4. Expected outcome. 
+
+Your answer must return the exact jurisdiction name and abbreviation (NOT: citation_abbreviation) as it appears on CourtListener’s jurisdiction list (found at https://www.courtlistener.com/help/api/jurisdictions/).
+
+Use the following case information:
+
+State and city: ${caseData.jurisdiction}
+Case Type: ${(intakeResults.case_metadata.case_type || []).join(', ')}
+Case Issues: ${(intakeResults.case_metadata.issue || []).join(', ')}
+Case expected outcome: ${caseData.expected_outcome}
+
+---
+
+Respond only with this exact JSON format:
+
+{
+  "jurisdiction_enriched": "...",
+  "court_abbreviation": "..."
+}`
   },
-  
+
   CASE_ENHANCEMENT: {
     model: 'gpt-4-turbo-preview',
     temperature: 0.3,
-    prompt: (caseData, intakeAnalysis, jurisdiction, similarCases) => `
-      Enhance this case with legal analysis and similar case insights:
-      
-      Case: ${JSON.stringify(caseData)}
-      Initial Analysis: ${JSON.stringify(intakeAnalysis)}
-      Jurisdiction: ${JSON.stringify(jurisdiction)}
-      Similar Cases from CourtListener: ${JSON.stringify(similarCases?.slice(0, 5))}
-      
-      Provide comprehensive legal enhancement:
-      {
-        "cause_of_action": ["Primary cause", "Secondary cause"],
-        "applicable_statute": ["Statute 1", "Statute 2"],
-        "applicable_case_law": ["Case 1", "Case 2"],
-        "enhanced_case_type": "Specific case type",
-        "jurisdiction_enriched": "Detailed jurisdiction",
-        "court_abbreviation": "Court code",
-        "legal_strategy_recommendations": ["Strategy 1"],
-        "precedent_analysis": "Analysis of similar cases",
-        "statutory_interpretation": "Relevant statutory analysis"
-      }
-    `
+    prompt: (caseData, intakeResults, jurisdiction, documentContent) => `You are an AI legal assistant. Analyze this case and return your output in the **exact JSON format** below.
+
+- Use structured arrays for lists
+- Use null for anything unknown or not applicable
+- Keep text fields short and objective (max 2-3 sentences)
+- DO NOT say “Not specified” or repeat the field label
+
+- Enhance cause(s) of action (Return only the exact causes of action)
+- Specific legal issues
+- Related statutes, ordinances, or rules, list in order of importance to the case
+- Any known similar case law
+
+Here is the case:
+
+Case Type: ${(intakeResults.case_metadata.case_type || []).join(', ')}
+Case Stage: ${intakeResults.case_metadata.case_stage}
+Jurisdiction: ${jurisdiction.jurisdiction_enriched}
+Date Filed: ${intakeResults.case_metadata.date_filed}
+Applicable Law: ${(intakeResults.case_metadata.applicable_law || []).join(', ')}
+Case Issues: ${(intakeResults.case_metadata.issue || []).join(', ')}
+Case Narrative: ${caseData.case_narrative}
+Case Evidence: ${documentContent}
+Requested financial outcome: ${caseData.expected_outcome}
+
+Respond in this exact JSON format:
+{
+  "cause_of_action": ["..."],
+  "applicable_statute": ["..."],
+  "enhanced_case_type": "...",
+  "applicable_case_law": ["..."]
+}`
   },
-  
-  COMPLEXITY_CALCULATION: {
+
+  COURT_OPINION_ANALYSIS: {
+    model: 'gpt-4-turbo-preview',
+    temperature: 0.3,
+    prompt: (opinionText) => `You are an expert legal analyst AI. Analyze the following court opinion and extract the following structured fields.
+
+Court Opinion:
+${opinionText}
+
+Respond ONLY in this exact JSON format:
+{
+  "legal_issues": ["..."],
+  "strategy_used": "...",
+  "outcome": "...",
+  "applicable_statutes": ["..."],
+  "decision_summary": "...",
+  "similarity_score": 0.0
+}`
+  },
+
+  COMPLEXITY_SCORE: {
     model: 'gpt-4-turbo-preview',
     temperature: 0.1,
-    prompt: (caseData, enhancement, evidence) => `
-      Calculate case complexity score (0-100):
-      
-      Case: ${JSON.stringify(caseData)}
-      Enhancement: ${JSON.stringify(enhancement)}
-      Evidence Count: ${evidence.length}
-      
-      Consider:
-      - Number of parties
-      - Legal issues complexity
-      - Evidence volume
-      - Jurisdictional challenges
-      - Precedent clarity
-      
-      Return a single number between 0-100.
-    `
+    prompt: (caseData, enhancement, precedentSummary) => `You are an expert legal analyst AI. Based on the following case data, assign a case complexity score from 0.0 to 1.0 (0.0 = simple case, 1.0 = highly complex). 
+Analyze based on number of issues, applicable statutes, jurisdictions, legal precedents, and court level.
+
+Respond ONLY in this exact JSON format:
+
+{
+  "case_complexity_score": 0.85
+}
+
+Case Data:
+- Enhanced Case Type: ${enhancement.enhanced_case_type}
+- Applicable Statutes: ${(enhancement.applicable_statute || []).join(', ')}
+- Jurisdiction: ${enhancement.jurisdiction_enriched}
+- Precedent Cases Summary: ${precedentSummary}
+-Outcome of similar past cases (DO NOT invent or hallucinate similar cases, only cases that have actually been in trial from the CourtListener data)
+-Case Narrative: ${caseData.case_narrative}
+`
   },
-  
-  LEGAL_PREDICTION: {
+
+  PREDICTION_ANALYSIS: {
     model: 'gpt-4-turbo-preview',
     temperature: 0.4,
-    prompt: (enrichedData, caseData, complexityScore, similarCases) => `
-      Generate legal predictions for this case:
-      
-      Case Data: ${JSON.stringify(caseData)}
-      Enriched Analysis: ${JSON.stringify(enrichedData)}
-      Complexity Score: ${complexityScore}
-      Similar Case Outcomes: ${JSON.stringify(similarCases?.slice(0, 3))}
-      
-      Provide predictions:
-      {
-        "outcome_prediction_score": 0.75,
-        "settlement_likelihood": 0.60,
-        "estimated_duration_months": [12, 18],
-        "estimated_costs": {
-          "low": 50000,
-          "high": 150000,
-          "most_likely": 85000
-        },
-        "risk_score": 0.45,
-        "key_risk_factors": ["Risk 1", "Risk 2"],
-        "success_factors": ["Factor 1", "Factor 2"],
-        "recommended_strategies": ["Strategy 1"],
-        "settlement_range": {
-          "low": 100000,
-          "high": 500000,
-          "most_likely": 250000
-        },
-        "confidence_level": "High/Medium/Low",
-        "prediction_rationale": "Detailed explanation"
-      }
-    `
+    prompt: (data) => `You are a legal prediction AI. Based on the following case data and precedent analysis, return a prediction object with estimated values for each field in our legal prediction schema.
+
+Use all available information to provide the most accurate and insightful values. Keep numeric fields as decimals (not strings), and use null if unknown.
+
+Input Data:
+- Enhanced Case Type: ${data.enhanced_case_type}
+- Causes of Action: ${(data.cause_of_action || []).join(', ')}
+- Jurisdiction: ${data.jurisdiction_enriched}
+- Applicable Statutes: ${(data.applicable_statute || []).join(', ')}
+- Applicable Case Law: ${(data.applicable_case_law || []).join(', ')}
+- Precedent Case Comparison: ${data.precedent_case_comparison}
+- Case Complexity Score: ${data.case_complexity_score}
+- Case Narrative: ${data.case_narrative}
+- History Narrative: ${data.history_narrative}
+- Case Stage: ${data.case_stage}
+- Date Filed: ${data.date_filed}
+- Evidence Summary: ${data.evidence_summary}
+
+---
+
+Respond ONLY in this exact JSON format:
+
+{
+  "outcome_prediction_score": 0.0,
+  "confidence_prediction_percentage": 0.0,
+  "estimated_financial_outcome": 0.0,
+  "financial_outcome_range": {"min": 0.0, "max": 0.0},
+  "litigation_cost_estimate": 0.0,
+  "litigation_cost_range": {"min": 0.0, "max": 0.0},
+  "settlement_success_rate": 0.0,
+  "plaintiff_success": 0.0,
+  "appeal_after_trial": 0.0,
+  "case_complexity_score": 0.0,
+  "risk_score": 0.0,
+  "prior_similar_rulings": [],
+  "precedent_cases": [],
+  "witness_score": 0.0,
+  "primary_fact_strength_analysis": 0.0,
+  "fact_strength_analysis": [],
+  "average_time_resolution": 0.0,
+  "resolution_time_range": {"min": 0.0, "max": 0.0},
+  "real_time_law_changes": [],
+  "analyzed_cases": [],
+  "similar_cases": [],
+  "average_time_resolution_type": "...",
+  "judge_analysis": "...",
+  "lawyer_analysis": "...",
+  "settlement_trial_analysis": "...",
+  "recommended_settlement_window": "...",
+  "primary_strategy": "...",
+  "alternative_approach": "...",
+  "additional_facts_recommendations": "..."
+}`
   }
 };

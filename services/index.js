@@ -26,6 +26,9 @@ module.exports = {
     costMonitor: require('./costMonitor.service'),
     courtlistenerService: require('./courtlistener.service'),
     
+    // Linear pipeline service (new refactor)
+    linearPipelineService: require('./linear-pipeline.service'),
+    
     // Re-export individual services for backwards compatibility
     SupabaseService: require('./supabase.service'),
     ErrorTrackingService: require('./error-tracking.service'),
@@ -41,5 +44,6 @@ module.exports = {
     RateLimiter: require('./rateLimiter'),
     QueueService: require('./queueService'),
     CostMonitor: require('./costMonitor.service'),
-    CourtListenerService: require('./courtlistener.service')
+    CourtListenerService: require('./courtlistener.service'),
+    LinearPipelineService: require('./linear-pipeline.service')
   };

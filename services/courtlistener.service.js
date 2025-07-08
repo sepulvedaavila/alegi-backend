@@ -198,6 +198,91 @@ class CourtListenerService {
       message: 'CourtListener service unavailable - using fallback data'
     };
   }
+
+  async fetchCaseOpinions(caseId) {
+    try {
+      // If no API key, return mock data
+      if (!this.apiKey) {
+        console.warn('CourtListener API key not found - returning mock opinions');
+        return this.getMockOpinions(caseId);
+      }
+
+      const response = await this.makeAPICall(`opinions/`, {
+        cluster: caseId,
+        page_size: 20
+      });
+
+      return response.results || [];
+    } catch (error) {
+      console.error('CourtListener fetch opinions error:', error);
+      Sentry.captureException(error, {
+        tags: { service: 'courtlistener', operation: 'fetchCaseOpinions' },
+        extra: { caseId }
+      });
+      
+      // Return mock data on error
+      return this.getMockOpinions(caseId);
+    }
+  }
+
+  // Alias for findSimilarCases to match the linear pipeline interface
+  async searchSimilarCases(caseData, intakeAnalysis, options = {}) {
+    try {
+      // If no API key, return mock data instead of failing
+      if (!this.apiKey) {
+        console.warn('CourtListener API key not found - returning mock data');
+        return this.getMockSimilarCases(caseData);
+      }
+
+      const searchParams = {
+        q: this.buildSearchQuery(caseData),
+        type: 'o', // opinions
+        filed_after: this.getDateRange(caseData),
+        order_by: 'score desc',
+        page_size: options.enhanced ? 20 : 10
+      };
+
+      // Use centralized court mapping
+      if (caseData.jurisdiction) {
+        const courtCodes = mapToCourtListenerCourt(caseData.jurisdiction);
+        if (courtCodes) {
+          searchParams.court = courtCodes;
+        }
+      }
+
+      // Add intake analysis to search query if available
+      if (intakeAnalysis && intakeAnalysis.legal_issues) {
+        searchParams.q += ' ' + intakeAnalysis.legal_issues.join(' ');
+      }
+
+      const results = await this.makeAPICall('search/', searchParams);
+      return this.processSimilarCases(results);
+    } catch (error) {
+      console.error('CourtListener search failed:', error);
+      
+      // Report to Sentry
+      Sentry.captureException(error, {
+        tags: { service: 'courtlistener', operation: 'searchSimilarCases' },
+        extra: { caseData, intakeAnalysis, options }
+      });
+
+      // Return fallback data instead of failing
+      return this.getMockSimilarCases(caseData);
+    }
+  }
+
+  getMockOpinions(caseId) {
+    return [
+      {
+        id: `mock-opinion-${caseId}-1`,
+        opinion: 'Mock opinion text for testing purposes',
+        date_filed: new Date().toISOString(),
+        judge: 'Mock Judge',
+        court: 'Mock Court',
+        type: 'majority'
+      }
+    ];
+  }
 }
 
 module.exports = new CourtListenerService();
