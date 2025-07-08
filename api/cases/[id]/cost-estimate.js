@@ -141,7 +141,11 @@ async function adjustEstimatesWithAI(params) {
   if (!openai) {
     console.log('OpenAI not available, using base estimates');
     return {
-      total: params.base,
+      total: {
+        min: params.base.min,
+        avg: params.base.avg,
+        max: params.base.max
+      },
       breakdown: {
         filing: params.base.avg * 0.05,
         discovery: params.base.avg * 0.35,
@@ -175,12 +179,38 @@ async function adjustEstimatesWithAI(params) {
     
     const result = JSON.parse(analysis.choices[0].message.content);
     console.log('AI adjustment completed successfully');
+    
+    // Validate the AI response structure
+    if (!result.total || typeof result.total !== 'object' || !result.total.avg) {
+      console.warn('AI response missing or invalid total structure, using base estimates');
+      return {
+        total: {
+          min: params.base.min,
+          avg: params.base.avg,
+          max: params.base.max
+        },
+        breakdown: {
+          filing: params.base.avg * 0.05,
+          discovery: params.base.avg * 0.35,
+          motion_practice: params.base.avg * 0.20,
+          trial_prep: params.base.avg * 0.25,
+          trial: params.base.avg * 0.15
+        },
+        confidence: 'medium',
+        assumptions: ['AI response structure invalid, using base estimates']
+      };
+    }
+    
     return result;
   } catch (error) {
     console.error('Error adjusting estimates with AI:', error);
     // Return base estimates if AI fails
     return {
-      total: params.base,
+      total: {
+        min: params.base.min,
+        avg: params.base.avg,
+        max: params.base.max
+      },
       breakdown: {
         filing: params.base.avg * 0.05,
         discovery: params.base.avg * 0.35,
@@ -224,9 +254,16 @@ function generatePaymentSchedule(estimates, currentStage, strategy) {
     return 'pending';
   }
   
+  // Get the average amount from the total estimates with fallback
+  const totalAmount = estimates?.total?.avg || estimates?.avg || 0;
+  
+  if (totalAmount === 0) {
+    console.warn('No valid total amount found in estimates, using default');
+  }
+  
   return phases.map(phase => ({
     ...phase,
-    amount: estimates.total.avg * phase.percentage,
+    amount: totalAmount * phase.percentage,
     status: getPhaseStatus(phase.phase, currentStage)
   }));
 }
@@ -303,6 +340,11 @@ module.exports = async (req, res) => {
     
     // Generate payment schedule
     console.log('Generating payment schedule...');
+    console.log('Adjusted estimates structure:', {
+      hasTotal: !!adjustedEstimates.total,
+      totalType: typeof adjustedEstimates.total,
+      totalKeys: adjustedEstimates.total ? Object.keys(adjustedEstimates.total) : 'undefined'
+    });
     const paymentSchedule = generatePaymentSchedule(
       adjustedEstimates,
       caseData.case_stage || 'filing',
