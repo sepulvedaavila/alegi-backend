@@ -52,7 +52,6 @@ module.exports = async (req, res) => {
   try {
     const user = await validateSupabaseToken(req);
     const { id: caseId } = req.query;
-    const { mode = 'sequential', delay = 3000 } = req.query;
     
     if (!caseId) {
       return res.status(400).json({ error: 'Case ID is required' });
@@ -61,42 +60,40 @@ module.exports = async (req, res) => {
     // Verify case exists and user has access
     const caseData = await getCaseDetails(caseId, user.id);
     
-    console.log(`Manual analysis trigger for case ${caseId} by user ${user.id}`);
-    
-    let results;
-    
-    if (mode === 'parallel') {
-      console.log('Triggering parallel analysis...');
-      results = await internalAPIService.triggerAllAnalysis(caseId);
-    } else {
-      console.log('Triggering sequential analysis...');
-      results = await internalAPIService.triggerSequentialAnalysis(caseId, parseInt(delay));
+    // Check if case is still processing
+    if (caseData.processing_status === 'processing') {
+      return res.status(409).json({ 
+        error: 'Case is still being processed',
+        message: 'Analysis will be triggered automatically once processing is complete. Please wait.',
+        processing_status: caseData.processing_status
+      });
     }
     
-    // Update case status to indicate analysis was triggered
-    await supabase
-      .from('case_briefs')
-      .update({ 
-        last_analysis_trigger: new Date().toISOString(),
-        analysis_status: 'triggered'
-      })
-      .eq('id', caseId);
+    // Check if analysis has already been triggered
+    if (caseData.analysis_status === 'completed' || caseData.analysis_status === 'triggered') {
+      return res.status(409).json({ 
+        error: 'Analysis already completed',
+        message: 'Analysis has already been triggered and completed for this case.',
+        analysis_status: caseData.analysis_status,
+        last_analysis_trigger: caseData.last_analysis_trigger
+      });
+    }
     
+    console.log(`Manual analysis trigger requested for case ${caseId} by user ${user.id}`);
+    
+    // Return information about the linear pipeline process
     const response = {
       success: true,
       caseId: caseId,
-      mode: mode,
-      delay: parseInt(delay),
-      results: {
-        successful: Object.values(results).filter(r => r !== null).length,
-        total: 3, // judge-trends, precedents, risk-assessment
-        errors: results.errors.length,
-        errorDetails: results.errors
-      },
+      message: 'Analysis is integrated into the linear pipeline process',
+      note: 'This endpoint is deprecated. Analysis is now automatically triggered as part of the case processing pipeline when a case is uploaded via webhook.',
+      processing_status: caseData.processing_status,
+      analysis_status: caseData.analysis_status,
+      recommendation: 'Upload your case documents and the analysis will be triggered automatically through the webhook system.',
       timestamp: new Date().toISOString()
     };
     
-    console.log(`Analysis trigger completed for case ${caseId}:`, response.results);
+    console.log(`Analysis trigger info provided for case ${caseId}`);
     
     res.json(response);
     

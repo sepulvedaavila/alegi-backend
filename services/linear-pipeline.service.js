@@ -4,6 +4,7 @@ const AIService = require('./ai.service');
 const PDFService = require('./pdf.service');
 const CourtListenerService = require('./courtlistener.service');
 const ErrorTrackingService = require('./error-tracking.service');
+const InternalAPIService = require('./internal-api.service');
 
 class LinearPipelineService {
   constructor() {
@@ -28,6 +29,7 @@ class LinearPipelineService {
     this.pdfService = PDFService;
     this.courtListenerService = CourtListenerService;
     this.errorTrackingService = ErrorTrackingService;
+    this.internalAPIService = InternalAPIService;
   }
 
   async executeLinearPipeline(caseId) {
@@ -47,7 +49,8 @@ class LinearPipelineService {
       { name: 'complexityScore', fn: this.executeComplexityScore.bind(this) },
       { name: 'predictionAnalysis', fn: this.executePredictionAnalysis.bind(this) },
       { name: 'additionalAnalysis', fn: this.executeAdditionalAnalysis.bind(this) },
-      { name: 'finalDbInsert', fn: this.insertFinalData.bind(this) }
+      { name: 'finalDbInsert', fn: this.insertFinalData.bind(this) },
+      { name: 'triggerAnalysis', fn: this.executeTriggerAnalysis.bind(this) }
     ];
 
     const context = { caseId, data: {} };
@@ -70,7 +73,8 @@ class LinearPipelineService {
           hasCourtListenerCases: !!context.data.courtListenerCases?.length,
           hasComplexityScore: !!context.data.complexityScore,
           hasPredictionAnalysis: !!context.data.predictionAnalysis,
-          hasAdditionalAnalysis: !!context.data.additionalAnalysis
+          hasAdditionalAnalysis: !!context.data.additionalAnalysis,
+          hasTriggerAnalysis: !!context.data.triggerAnalysis
         });
         
         const stepStartTime = Date.now();
@@ -88,7 +92,8 @@ class LinearPipelineService {
           hasCourtListenerCases: !!context.data.courtListenerCases?.length,
           hasComplexityScore: !!context.data.complexityScore,
           hasPredictionAnalysis: !!context.data.predictionAnalysis,
-          hasAdditionalAnalysis: !!context.data.additionalAnalysis
+          hasAdditionalAnalysis: !!context.data.additionalAnalysis,
+          hasTriggerAnalysis: !!context.data.triggerAnalysis
         });
         
       } catch (error) {
@@ -116,7 +121,8 @@ class LinearPipelineService {
             hasCourtListenerCases: !!context.data.courtListenerCases?.length,
             hasComplexityScore: !!context.data.complexityScore,
             hasPredictionAnalysis: !!context.data.predictionAnalysis,
-            hasAdditionalAnalysis: !!context.data.additionalAnalysis
+            hasAdditionalAnalysis: !!context.data.additionalAnalysis,
+            hasTriggerAnalysis: !!context.data.triggerAnalysis
           }
         });
         
@@ -154,7 +160,8 @@ class LinearPipelineService {
       hasCourtListenerCases: !!context.data.courtListenerCases?.length,
       hasComplexityScore: !!context.data.complexityScore,
       hasPredictionAnalysis: !!context.data.predictionAnalysis,
-      hasAdditionalAnalysis: !!context.data.additionalAnalysis
+      hasAdditionalAnalysis: !!context.data.additionalAnalysis,
+      hasTriggerAnalysis: !!context.data.triggerAnalysis
     });
       
     return context.data;
@@ -1447,6 +1454,80 @@ class LinearPipelineService {
     } catch (error) {
       console.warn('Error getting law updates:', error);
       return [];
+    }
+  }
+
+  // Step: Execute trigger analysis (judge trends, precedents, risk assessment)
+  async executeTriggerAnalysis(context) {
+    const { caseId } = context;
+    
+    console.log(`🔍 Executing trigger analysis for case ${caseId}`);
+    
+    // Track processing stage
+    await this.trackProcessingStage(caseId, 'triggerAnalysis', 'started');
+    
+    try {
+      // Trigger sequential analysis with 3-second delay between each
+      const results = await this.internalAPIService.triggerSequentialAnalysis(caseId, 3000);
+      
+      // Store results in context
+      context.data.triggerAnalysis = results;
+      
+      // Update case status to indicate analysis was triggered
+      await this.supabase
+        .from('case_briefs')
+        .update({ 
+          last_analysis_trigger: new Date().toISOString(),
+          analysis_status: 'completed'
+        })
+        .eq('id', caseId);
+      
+      console.log(`✅ Trigger analysis completed for case ${caseId}:`, {
+        successful: Object.values(results).filter(r => r !== null).length,
+        total: 3,
+        errors: results.errors.length
+      });
+      
+      // Track processing stage completion
+      await this.trackProcessingStage(caseId, 'triggerAnalysis', 'completed', {
+        successful_analyses: Object.values(results).filter(r => r !== null).length,
+        total_analyses: 3,
+        error_count: results.errors.length
+      });
+      
+    } catch (error) {
+      console.error(`❌ Trigger analysis failed for case ${caseId}:`, error);
+      
+      // Update case status to indicate failure
+      await this.supabase
+        .from('case_briefs')
+        .update({ 
+          analysis_status: 'failed',
+          last_analysis_error: error.message
+        })
+        .eq('id', caseId);
+      
+      // Log error to tracking service
+      await this.errorTrackingService.logProcessingError(caseId, error, {
+        step: 'triggerAnalysis',
+        context: {
+          hasCaseData: !!context.data.caseData,
+          hasIntakeAnalysis: !!context.data.intakeAnalysis,
+          hasJurisdictionAnalysis: !!context.data.jurisdictionAnalysis,
+          hasCaseEnhancement: !!context.data.caseEnhancement,
+          hasCourtListenerCases: !!context.data.courtListenerCases?.length,
+          hasComplexityScore: !!context.data.complexityScore,
+          hasPredictionAnalysis: !!context.data.predictionAnalysis,
+          hasAdditionalAnalysis: !!context.data.additionalAnalysis
+        }
+      });
+      
+      // Track processing stage failure
+      await this.trackProcessingStage(caseId, 'triggerAnalysis', 'failed', {
+        error: error.message
+      });
+      
+      throw error;
     }
   }
 }
