@@ -44,6 +44,10 @@
       "maxDuration": 60,
       "memory": 1024
     },
+    "api/cases/[id]/enhanced-data.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
     "api/analytics/case-coverage.js": {
       "maxDuration": 30,
       "memory": 512
@@ -143,6 +147,10 @@
     {
       "source": "/api/cases/:id/find-similar",
       "destination": "/api/cases/[id]/find-similar.js"
+    },
+    {
+      "source": "/api/cases/:id/enhanced-data",
+      "destination": "/api/cases/[id]/enhanced-data.js"
     },
     {
       "source": "/api/cases/process",
