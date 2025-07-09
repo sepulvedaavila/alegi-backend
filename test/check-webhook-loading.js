@@ -15,7 +15,7 @@ try {
 }
 
 console.log('\n2. Checking if workers are processing...');
-const queueService = require('../services/queue.service');
+const queueService = require('../services/queueService');
 
 // Check if there are any jobs in the queue
 console.log('\n3. Checking queue state...');

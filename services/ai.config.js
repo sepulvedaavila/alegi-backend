@@ -44,5 +44,36 @@ module.exports = {
     complexity: 'gpt-4o-mini',
     prediction: 'gpt-4o',
     analysis: 'gpt-4-turbo'
+  },
+
+  // Get rate limits for current environment
+  getLimitsForEnvironment() {
+    const environment = process.env.NODE_ENV || 'development';
+    
+    // Use more conservative limits in production
+    if (environment === 'production') {
+      return {
+        rpm: {
+          'gpt-4': 10,
+          'gpt-4-turbo': 10,
+          'gpt-4o': 15,
+          'gpt-4o-mini': 30,
+          default: 10
+        },
+        tpm: {
+          'gpt-4': 100000,
+          'gpt-4-turbo': 100000,
+          'gpt-4o': 150000,
+          'gpt-4o-mini': 200000,
+          default: 100000
+        }
+      };
+    }
+    
+    // Use standard limits for development
+    return {
+      rpm: this.rateLimiting.rpm,
+      tpm: this.rateLimiting.tpm
+    };
   }
 };
