@@ -374,6 +374,114 @@ class AIService {
     }
   }
 
+  // Document structure extraction
+  async extractDocumentStructure(text, fileName) {
+    try {
+      const { model, temperature, prompt } = AI_PROMPTS.DOCUMENT_STRUCTURE_EXTRACTION;
+      
+      const response = await this.makeOpenAICall(model, [{
+        role: 'user',
+        content: prompt(text, fileName)
+      }], {
+        temperature,
+        response_format: { type: 'json_object' }
+      });
+
+      const result = JSON.parse(response.choices[0].message.content);
+      console.log('Document structure extraction completed');
+      
+      return result;
+    } catch (error) {
+      console.error('Document structure extraction error:', error);
+      Sentry.captureException(error, {
+        tags: { service: 'ai', operation: 'extractDocumentStructure' },
+        extra: { fileName }
+      });
+      
+      // Return fallback structure
+      return {
+        document_type: 'document',
+        parties: { plaintiffs: [], defendants: [] },
+        key_dates: {},
+        legal_claims: [],
+        damages_sought: '',
+        key_terms: [],
+        jurisdiction: '',
+        case_number: '',
+        error: error.message
+      };
+    }
+  }
+
+  // Case information fusion
+  async fuseCaseInformation(userProvided, documentExtracted) {
+    try {
+      const { model, temperature, prompt } = AI_PROMPTS.CASE_INFORMATION_FUSION;
+      
+      const response = await this.makeOpenAICall(model, [{
+        role: 'user',
+        content: prompt(userProvided, documentExtracted)
+      }], {
+        temperature,
+        response_format: { type: 'json_object' }
+      });
+
+      const result = JSON.parse(response.choices[0].message.content);
+      console.log('Case information fusion completed');
+      
+      return result;
+    } catch (error) {
+      console.error('Case information fusion error:', error);
+      Sentry.captureException(error, {
+        tags: { service: 'ai', operation: 'fuseCaseInformation' }
+      });
+      
+      // Return fallback fused result
+      return {
+        parties: {
+          plaintiffs: userProvided.case_narrative ? this.extractParties(userProvided.case_narrative, 'plaintiff') : [],
+          defendants: userProvided.case_narrative ? this.extractParties(userProvided.case_narrative, 'defendant') : []
+        },
+        legal_claims: userProvided.case_narrative ? this.extractClaims(userProvided.case_narrative) : [],
+        damages_sought: userProvided.expected_outcome || '',
+        key_dates: {},
+        jurisdiction: '',
+        case_number: '',
+        confidence_score: 0.5,
+        error: error.message
+      };
+    }
+  }
+
+  // Helper method to extract parties from text
+  extractParties(text, partyType) {
+    // Simple extraction - in production, use more sophisticated NLP
+    const words = text.split(' ');
+    const parties = [];
+    for (let i = 0; i < words.length - 1; i++) {
+      if (words[i].toLowerCase().includes(partyType)) {
+        if (words[i + 1] && words[i + 1].length > 2) {
+          parties.push(words[i + 1]);
+        }
+      }
+    }
+    return parties.slice(0, 5); // Limit to 5 parties
+  }
+
+  // Helper method to extract claims from text
+  extractClaims(text) {
+    const claims = [];
+    const claimKeywords = ['breach', 'negligence', 'discrimination', 'harassment', 'contract', 'tort'];
+    
+    claimKeywords.forEach(keyword => {
+      if (text.toLowerCase().includes(keyword)) {
+        claims.push(keyword);
+      }
+    });
+    
+    return claims;
+  }
+
   // Complete case processing flow matching Make scenario
   async processCaseComplete(caseData, evidence, documentContent) {
     const results = {

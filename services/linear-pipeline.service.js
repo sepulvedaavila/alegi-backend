@@ -164,6 +164,9 @@ class LinearPipelineService {
   async extractPDFContent(context) {
     const { caseId } = context;
     
+    // Track processing stage
+    await this.trackProcessingStage(caseId, 'extractPDF', 'started');
+    
     // Get case documents
     const { data: documents, error } = await this.supabase
       .from('case_documents')
@@ -173,6 +176,7 @@ class LinearPipelineService {
     if (error) throw error;
     
     let extractedContent = '';
+    const documentExtractions = [];
     
     for (const document of documents || []) {
       if (document.file_path && !document.ai_extracted_text) {
@@ -185,22 +189,145 @@ class LinearPipelineService {
             .update({ ai_extracted_text: extractedText })
             .eq('id', document.id);
           
+          // Create structured extraction record
+          const structuredData = await this.extractStructuredData(extractedText, document.file_name);
+          const extractionRecord = {
+            id: document.id, // Use document ID as extraction ID
+            case_id: caseId,
+            document_id: document.id,
+            file_name: document.file_name,
+            file_type: document.file_type,
+            extracted_text: extractedText,
+            structured_data: structuredData,
+            extraction_metadata: {
+              service: 'pdfco',
+              extraction_timestamp: new Date().toISOString(),
+              pages: document.file_size ? Math.ceil(document.file_size / 5000) : 1, // Estimate pages
+              confidence: 0.95
+            },
+            processing_status: 'completed',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          };
+          
+          // Store in case_document_extractions
+          await this.supabase
+            .from('case_document_extractions')
+            .upsert(extractionRecord);
+          
+          documentExtractions.push(extractionRecord);
           extractedContent += extractedText + '\n\n';
+          
         } catch (error) {
           console.warn(`Failed to extract text from document ${document.id}:`, error);
+          
+          // Store error in extraction record
+          await this.supabase
+            .from('case_document_extractions')
+            .upsert({
+              id: document.id,
+              case_id: caseId,
+              document_id: document.id,
+              file_name: document.file_name,
+              file_type: document.file_type,
+              processing_status: 'failed',
+              error_message: error.message,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            });
         }
       } else if (document.ai_extracted_text) {
         extractedContent += document.ai_extracted_text + '\n\n';
+        
+        // Get existing extraction record
+        const { data: existingExtraction } = await this.supabase
+          .from('case_document_extractions')
+          .select('*')
+          .eq('document_id', document.id)
+          .single();
+        
+        if (existingExtraction) {
+          documentExtractions.push(existingExtraction);
+        }
       }
     }
     
     context.data.extractedContent = extractedContent;
     context.data.documents = documents || [];
+    context.data.documentExtractions = documentExtractions;
+    
+    // Track processing stage completion
+    await this.trackProcessingStage(caseId, 'extractPDF', 'completed', {
+      documents_processed: documents?.length || 0,
+      extractions_created: documentExtractions.length,
+      total_text_length: extractedContent.length
+    });
+  }
+
+  // Helper method to extract structured data from text
+  async extractStructuredData(text, fileName) {
+    try {
+      // Use AI to extract structured data from document text
+      const structuredData = await this.aiService.extractDocumentStructure(text, fileName);
+      return structuredData;
+    } catch (error) {
+      console.warn('Failed to extract structured data:', error);
+      return {
+        document_type: this.inferDocumentType(fileName),
+        parties: { plaintiffs: [], defendants: [] },
+        key_dates: {},
+        legal_claims: [],
+        damages_sought: '',
+        key_terms: [],
+        jurisdiction: '',
+        case_number: ''
+      };
+    }
+  }
+
+  // Helper method to infer document type from filename
+  inferDocumentType(fileName) {
+    const lowerFileName = fileName.toLowerCase();
+    if (lowerFileName.includes('complaint')) return 'complaint';
+    if (lowerFileName.includes('answer')) return 'answer';
+    if (lowerFileName.includes('motion')) return 'motion';
+    if (lowerFileName.includes('order')) return 'order';
+    if (lowerFileName.includes('judgment')) return 'judgment';
+    if (lowerFileName.includes('settlement')) return 'settlement';
+    if (lowerFileName.includes('contract')) return 'contract';
+    if (lowerFileName.includes('agreement')) return 'agreement';
+    if (lowerFileName.includes('notice')) return 'notice';
+    if (lowerFileName.includes('letter')) return 'letter';
+    return 'document';
+  }
+
+  // Helper method to track processing stages
+  async trackProcessingStage(caseId, stageName, status, result = null) {
+    try {
+      await this.supabase
+        .from('case_processing_stages')
+        .upsert({
+          id: `${caseId}-${stageName}`,
+          case_id: caseId,
+          stage_name: stageName,
+          stage_status: status,
+          stage_result: result,
+          started_at: status === 'started' ? new Date().toISOString() : null,
+          completed_at: status === 'completed' ? new Date().toISOString() : null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
+    } catch (error) {
+      console.warn(`Failed to track processing stage ${stageName}:`, error);
+    }
   }
 
   // Step 2: Execute intake analysis
   async executeIntakeAnalysis(context) {
     const { caseId, data } = context;
+    
+    // Track processing stage
+    await this.trackProcessingStage(caseId, 'executeIntakeAnalysis', 'started');
     
     // Get case data
     const { data: caseData, error } = await this.supabase
@@ -229,11 +356,20 @@ class LinearPipelineService {
     context.data.intakeAnalysis = intakeAnalysis;
     context.data.caseData = caseData;
     context.data.evidence = evidence || [];
+    
+    // Track processing stage completion
+    await this.trackProcessingStage(caseId, 'executeIntakeAnalysis', 'completed', {
+      case_type: intakeAnalysis.case_metadata?.case_type,
+      legal_issues_count: intakeAnalysis.case_metadata?.issue?.length || 0
+    });
   }
 
   // Step 3: Insert intake data
   async insertIntakeData(context) {
     const { caseId, data } = context;
+    
+    // Track processing stage
+    await this.trackProcessingStage(caseId, 'insertIntakeData', 'started');
     
     // Update case with intake analysis results
     await this.supabase
@@ -247,11 +383,91 @@ class LinearPipelineService {
         updated_at: new Date().toISOString()
       })
       .eq('id', caseId);
+
+    // Fuse user-provided data with document-extracted data
+    await this.fuseCaseData(caseId, data);
+    
+    // Track processing stage completion
+    await this.trackProcessingStage(caseId, 'insertIntakeData', 'completed');
+  }
+
+  // Helper method to fuse case data
+  async fuseCaseData(caseId, data) {
+    try {
+      // Prepare user-provided data
+      const userProvided = {
+        case_narrative: data.caseData.case_narrative,
+        history_narrative: data.caseData.history_narrative,
+        applicable_law: data.caseData.applicable_law,
+        expected_outcome: data.caseData.expected_outcome,
+        additional_notes: data.caseData.additional_notes,
+        attorneys_of_record: data.caseData.attorneys_of_record,
+        intake_analysis: data.intakeAnalysis
+      };
+
+      // Prepare document-extracted data
+      const documentExtracted = {
+        documents: data.documentExtractions?.map(extraction => ({
+          file_name: extraction.file_name,
+          document_type: extraction.structured_data?.document_type,
+          parties: extraction.structured_data?.parties,
+          legal_claims: extraction.structured_data?.legal_claims,
+          damages_sought: extraction.structured_data?.damages_sought,
+          key_dates: extraction.structured_data?.key_dates,
+          jurisdiction: extraction.structured_data?.jurisdiction,
+          case_number: extraction.structured_data?.case_number
+        })) || [],
+        total_documents: data.documentExtractions?.length || 0
+      };
+
+      // Fuse the data using AI
+      const fusedResult = await this.aiService.fuseCaseInformation(userProvided, documentExtracted);
+
+      // Store in case_data_fusion table
+      await this.supabase
+        .from('case_data_fusion')
+        .upsert({
+          id: caseId, // Use case ID as fusion ID
+          case_id: caseId,
+          user_provided: userProvided,
+          document_extracted: documentExtracted,
+          fused_result: fusedResult,
+          fusion_metadata: {
+            fusion_timestamp: new Date().toISOString(),
+            documents_processed: data.documentExtractions?.length || 0,
+            fusion_method: 'ai_enhanced'
+          },
+          fusion_status: 'completed',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
+
+      console.log('Case data fusion completed');
+    } catch (error) {
+      console.error('Case data fusion failed:', error);
+      
+      // Store fusion attempt with error
+      await this.supabase
+        .from('case_data_fusion')
+        .upsert({
+          id: caseId,
+          case_id: caseId,
+          user_provided: { case_narrative: data.caseData.case_narrative },
+          document_extracted: { documents: [] },
+          fusion_status: 'failed',
+          error_message: error.message,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
+    }
   }
 
   // Step 4: Execute jurisdiction analysis
   async executeJurisdictionAnalysis(context) {
-    const { data } = context;
+    const { caseId, data } = context;
+    
+    // Track processing stage
+    await this.trackProcessingStage(caseId, 'executeJurisdictionAnalysis', 'started');
     
     const jurisdictionAnalysis = await this.aiService.executeJurisdictionAnalysis(
       data.caseData,
@@ -259,11 +475,20 @@ class LinearPipelineService {
     );
     
     context.data.jurisdictionAnalysis = jurisdictionAnalysis;
+    
+    // Track processing stage completion
+    await this.trackProcessingStage(caseId, 'executeJurisdictionAnalysis', 'completed', {
+      jurisdiction: jurisdictionAnalysis.jurisdiction,
+      is_federal: jurisdictionAnalysis.is_federal
+    });
   }
 
   // Step 5: Execute case enhancement
   async executeCaseEnhancement(context) {
-    const { data } = context;
+    const { caseId, data } = context;
+    
+    // Track processing stage
+    await this.trackProcessingStage(caseId, 'executeCaseEnhancement', 'started');
     
     // Get CourtListener cases for enhancement
     const courtListenerCases = await this.courtListenerService.searchSimilarCases(
@@ -280,11 +505,20 @@ class LinearPipelineService {
     
     context.data.caseEnhancement = caseEnhancement;
     context.data.courtListenerCases = courtListenerCases;
+    
+    // Track processing stage completion
+    await this.trackProcessingStage(caseId, 'executeCaseEnhancement', 'completed', {
+      enhanced_case_type: caseEnhancement.enhanced_case_type,
+      court_listener_cases: courtListenerCases.count || 0
+    });
   }
 
   // Step 6: Insert enhancement data
   async insertEnhancementData(context) {
     const { caseId, data } = context;
+    
+    // Track processing stage
+    await this.trackProcessingStage(caseId, 'insertEnhancementData', 'started');
     
     // Update case AI enrichment
     await this.supabase
@@ -305,11 +539,17 @@ class LinearPipelineService {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       });
+    
+    // Track processing stage completion
+    await this.trackProcessingStage(caseId, 'insertEnhancementData', 'completed');
   }
 
   // Step 7: Search CourtListener
   async searchCourtListener(context) {
-    const { data } = context;
+    const { caseId, data } = context;
+    
+    // Track processing stage
+    await this.trackProcessingStage(caseId, 'searchCourtListener', 'started');
     
     // This step was already done in case enhancement, but we can enhance it further
     const enhancedSearch = await this.courtListenerService.searchSimilarCases(
@@ -319,11 +559,67 @@ class LinearPipelineService {
     );
     
     context.data.enhancedCourtListenerCases = enhancedSearch;
+    
+    // Store precedent cases in structured table
+    await this.storePrecedentCases(caseId, enhancedSearch);
+    
+    // Track processing stage completion
+    await this.trackProcessingStage(caseId, 'searchCourtListener', 'completed', {
+      cases_found: enhancedSearch.count || 0,
+      cases_processed: enhancedSearch.results?.length || 0
+    });
+  }
+
+  // Helper method to store precedent cases
+  async storePrecedentCases(caseId, courtListenerData) {
+    try {
+      if (!courtListenerData.results || courtListenerData.results.length === 0) {
+        console.log('No precedent cases to store');
+        return;
+      }
+
+      // Delete existing precedent cases for this case
+      await this.supabase
+        .from('precedent_cases')
+        .delete()
+        .eq('case_id', caseId);
+
+      // Store each precedent case
+      for (const courtCase of courtListenerData.results) {
+        const precedentCase = {
+          case_name: courtCase.case_name || 'Unknown Case',
+          citation: courtCase.citation || '',
+          court: courtCase.court || '',
+          jurisdiction: courtCase.jurisdiction || '',
+          judge_name: courtCase.judge || '',
+          legal_issues: courtCase.legal_issues || [],
+          applicable_statutes: courtCase.applicable_statutes || [],
+          strategy_used: courtCase.strategy || '',
+          outcome: courtCase.outcome || '',
+          decision_summary: courtCase.decision_summary || '',
+          full_text_url: courtCase.full_text_url || '',
+          similarity_score: courtCase.similarity_score || 0.5,
+          case_id: caseId,
+          created_at: new Date().toISOString()
+        };
+
+        await this.supabase
+          .from('precedent_cases')
+          .insert(precedentCase);
+      }
+
+      console.log(`Stored ${courtListenerData.results.length} precedent cases`);
+    } catch (error) {
+      console.error('Failed to store precedent cases:', error);
+    }
   }
 
   // Step 8: Fetch opinions
   async fetchOpinions(context) {
-    const { data } = context;
+    const { caseId, data } = context;
+    
+    // Track processing stage
+    await this.trackProcessingStage(caseId, 'fetchOpinions', 'started');
     
     const opinions = [];
     
@@ -338,11 +634,19 @@ class LinearPipelineService {
     }
     
     context.data.opinions = opinions;
+    
+    // Track processing stage completion
+    await this.trackProcessingStage(caseId, 'fetchOpinions', 'completed', {
+      opinions_fetched: opinions.length
+    });
   }
 
   // Step 9: Execute court opinion analysis
   async executeCourtOpinionAnalysis(context) {
-    const { data } = context;
+    const { caseId, data } = context;
+    
+    // Track processing stage
+    await this.trackProcessingStage(caseId, 'executeCourtOpinionAnalysis', 'started');
     
     // Analyze opinions for legal insights
     const opinionAnalysis = await this.aiService.executeCourtOpinionAnalysis(
@@ -350,11 +654,19 @@ class LinearPipelineService {
     );
     
     context.data.opinionAnalysis = opinionAnalysis;
+    
+    // Track processing stage completion
+    await this.trackProcessingStage(caseId, 'executeCourtOpinionAnalysis', 'completed', {
+      opinions_analyzed: data.opinions.length
+    });
   }
 
   // Step 10: Insert opinion data
   async insertOpinionData(context) {
     const { caseId, data } = context;
+    
+    // Track processing stage
+    await this.trackProcessingStage(caseId, 'insertOpinionData', 'started');
     
     // Save similar cases
     if (data.courtListenerCases?.length > 0) {
@@ -363,125 +675,84 @@ class LinearPipelineService {
         .from('similar_cases')
         .delete()
         .eq('case_id', caseId);
-      
+
       // Insert new similar cases
-      const similarCasesData = data.courtListenerCases.map(courtCase => ({
-        case_id: caseId,
-        similar_case_id: courtCase.id,
-        case_name: courtCase.case_name,
-        court: courtCase.court,
-        decision_date: courtCase.decision_date,
-        relevance_score: courtCase.relevance_score || 0.5,
-        created_at: new Date().toISOString()
-      }));
-      
-      await this.supabase
-        .from('similar_cases')
-        .insert(similarCasesData);
+      for (const courtCase of data.courtListenerCases) {
+        await this.supabase
+          .from('similar_cases')
+          .insert({
+            case_id: caseId,
+            similar_case_id: courtCase.id,
+            similarity_score: courtCase.similarity_score || 0.5,
+            case_name: courtCase.case_name,
+            court: courtCase.court,
+            jurisdiction: courtCase.jurisdiction,
+            outcome: courtCase.outcome,
+            created_at: new Date().toISOString()
+          });
+      }
     }
     
-    // Update AI enrichment with opinion analysis
-    await this.supabase
-      .from('case_ai_enrichment')
-      .update({
-        opinion_analysis: data.opinionAnalysis,
-        updated_at: new Date().toISOString()
-      })
-      .eq('case_id', caseId);
+    // Track processing stage completion
+    await this.trackProcessingStage(caseId, 'insertOpinionData', 'completed', {
+      similar_cases_stored: data.courtListenerCases?.length || 0
+    });
   }
 
   // Step 11: Execute complexity score
   async executeComplexityScore(context) {
-    const { data } = context;
+    const { caseId, data } = context;
     
-    // Create precedent summary from CourtListener cases
-    const precedentSummary = data.courtListenerCases?.map(courtCase => 
-      `${courtCase.case_name}: ${courtCase.decision_summary || 'No summary available'}`
-    ).join('; ') || 'No precedent cases found';
+    // Track processing stage
+    await this.trackProcessingStage(caseId, 'executeComplexityScore', 'started');
     
     const complexityScore = await this.aiService.executeComplexityScore(
       data.caseData,
       data.caseEnhancement,
-      precedentSummary
+      data.evidence
     );
     
     context.data.complexityScore = complexityScore;
+    
+    // Track processing stage completion
+    await this.trackProcessingStage(caseId, 'executeComplexityScore', 'completed', {
+      complexity_score: complexityScore
+    });
   }
 
   // Step 12: Execute prediction analysis
   async executePredictionAnalysis(context) {
-    const { data } = context;
+    const { caseId, data } = context;
+    
+    // Track processing stage
+    await this.trackProcessingStage(caseId, 'executePredictionAnalysis', 'started');
     
     try {
-      console.log(`Starting prediction analysis for case ${context.caseId}`);
-      
-      // Validate required data
-      if (!data.caseEnhancement) {
-        throw new Error('Missing case enhancement data for prediction analysis');
-      }
-      
-      if (!data.jurisdictionAnalysis) {
-        throw new Error('Missing jurisdiction analysis data for prediction analysis');
-      }
-      
-      if (!data.complexityScore) {
-        console.warn('Missing complexity score, using default value');
-        data.complexityScore = 50;
-      }
-      
-      // Prepare data for prediction analysis
-      const predictionData = {
-        enhanced_case_type: data.caseEnhancement.enhanced_case_type || 'Unknown',
-        cause_of_action: data.caseEnhancement.cause_of_action || [],
-        jurisdiction_enriched: data.jurisdictionAnalysis.jurisdiction_enriched || 'Unknown',
-        applicable_statute: data.caseEnhancement.applicable_statute || [],
-        applicable_case_law: data.caseEnhancement.applicable_case_law || [],
-        precedent_case_comparison: data.courtListenerCases?.map(c => c.case_name).join(', ') || 'None',
-        case_complexity_score: data.complexityScore,
-        case_narrative: data.caseData.case_narrative || 'No narrative provided',
-        history_narrative: data.caseData.history_narrative || 'No history provided',
-        case_stage: data.caseData.case_stage || 'Unknown',
-        date_filed: data.caseData.date_filed || 'Unknown',
-        evidence_summary: data.evidence?.map(e => e.description).join('; ') || 'No evidence provided'
-      };
-      
-      console.log('Prediction data prepared:', {
-        enhanced_case_type: predictionData.enhanced_case_type,
-        jurisdiction_enriched: predictionData.jurisdiction_enriched,
-        case_complexity_score: predictionData.case_complexity_score,
-        has_court_listener_cases: !!data.courtListenerCases?.length
+      const predictionAnalysis = await this.aiService.executePredictionAnalysis({
+        caseData: data.caseData,
+        caseEnhancement: data.caseEnhancement,
+        jurisdictionAnalysis: data.jurisdictionAnalysis,
+        complexityScore: data.complexityScore,
+        courtListenerCases: data.courtListenerCases,
+        opinionAnalysis: data.opinionAnalysis
       });
       
-      // Execute AI prediction analysis
-      const predictionAnalysis = await this.aiService.executePredictionAnalysis(predictionData);
+      context.data.predictionAnalysis = this.validateAndTransformPrediction(predictionAnalysis);
       
-      // Validate AI response
-      if (!predictionAnalysis || typeof predictionAnalysis !== 'object') {
-        throw new Error('Invalid prediction analysis response from AI service');
-      }
-      
-      console.log('AI prediction analysis completed:', {
+      // Track processing stage completion
+      await this.trackProcessingStage(caseId, 'executePredictionAnalysis', 'completed', {
         outcome_score: predictionAnalysis.outcome_prediction_score,
-        settlement_probability: predictionAnalysis.settlement_probability,
-        case_strength_score: predictionAnalysis.case_strength_score,
         risk_level: predictionAnalysis.risk_level
       });
       
-      // Transform and validate prediction data
-      const validatedPrediction = this.validateAndTransformPrediction(predictionAnalysis);
-      
-      context.data.predictionAnalysis = validatedPrediction;
-      
-      console.log(`Prediction analysis completed successfully for case ${context.caseId}`);
-      
     } catch (error) {
-      console.error(`Prediction analysis failed for case ${context.caseId}:`, error);
+      console.error(`Prediction analysis failed for case ${caseId}:`, error);
       
       // Set fallback prediction data
       context.data.predictionAnalysis = this.getFallbackPredictionData(data);
       
       // Log error to tracking service
-      await this.errorTrackingService.logProcessingError(context.caseId, error, {
+      await this.errorTrackingService.logProcessingError(caseId, error, {
         step: 'predictionAnalysis',
         context: {
           hasCaseEnhancement: !!data.caseEnhancement,
@@ -489,6 +760,11 @@ class LinearPipelineService {
           complexityScore: data.complexityScore,
           courtListenerCasesCount: data.courtListenerCases?.length || 0
         }
+      });
+      
+      // Track processing stage failure
+      await this.trackProcessingStage(caseId, 'executePredictionAnalysis', 'failed', {
+        error: error.message
       });
     }
   }
@@ -661,102 +937,53 @@ class LinearPipelineService {
     };
   }
 
-  // Step 13: Execute additional analysis for individual endpoints
+  // Step 13: Execute additional analysis
   async executeAdditionalAnalysis(context) {
     const { caseId, data } = context;
     
-    console.log(`Starting additional analysis generation for case ${caseId}`);
+    // Track processing stage
+    await this.trackProcessingStage(caseId, 'executeAdditionalAnalysis', 'started');
     
     try {
-      // Validate required data
-      if (!data.predictionAnalysis) {
-        console.warn('Missing prediction analysis data for additional analysis, using fallback data');
-        data.predictionAnalysis = this.getFallbackPredictionData(data);
-      }
+      // Get relevant law updates
+      const lawUpdates = await this.getRelevantLawUpdates(data);
       
-      // Generate all additional analysis data
-      const additionalAnalysis = {};
-      
-      // Cost estimate data
-      try {
-        additionalAnalysis.costEstimate = this.generateCostEstimate(data);
-        console.log('✅ Cost estimate generated successfully');
-      } catch (error) {
-        console.error('❌ Failed to generate cost estimate:', error);
-        additionalAnalysis.costEstimate = this.getFallbackCostEstimate(data);
-      }
-      
-      // Risk assessment data
-      try {
-        additionalAnalysis.riskAssessment = this.generateRiskAssessment(data);
-        console.log('✅ Risk assessment generated successfully');
-      } catch (error) {
-        console.error('❌ Failed to generate risk assessment:', error);
-        additionalAnalysis.riskAssessment = this.getFallbackRiskAssessment(data);
-      }
-      
-      // Settlement analysis data
-      try {
-        additionalAnalysis.settlementAnalysis = this.generateSettlementAnalysis(data);
-        console.log('✅ Settlement analysis generated successfully');
-      } catch (error) {
-        console.error('❌ Failed to generate settlement analysis:', error);
-        additionalAnalysis.settlementAnalysis = this.getFallbackSettlementAnalysis(data);
-      }
-      
-      // Timeline estimate data
-      try {
-        additionalAnalysis.timelineEstimate = this.generateTimelineEstimate(data);
-        console.log('✅ Timeline estimate generated successfully');
-      } catch (error) {
-        console.error('❌ Failed to generate timeline estimate:', error);
-        additionalAnalysis.timelineEstimate = this.getFallbackTimelineEstimate(data);
-      }
-      
-      // Financial prediction data
-      try {
-        additionalAnalysis.financialPrediction = this.generateFinancialPrediction(data);
-        console.log('✅ Financial prediction generated successfully');
-      } catch (error) {
-        console.error('❌ Failed to generate financial prediction:', error);
-        additionalAnalysis.financialPrediction = this.getFallbackFinancialPrediction(data);
-      }
-      
-      // Judge trends data
-      try {
-        additionalAnalysis.judgeTrends = this.generateJudgeTrends(data);
-        console.log('✅ Judge trends generated successfully');
-      } catch (error) {
-        console.error('❌ Failed to generate judge trends:', error);
-        additionalAnalysis.judgeTrends = this.getFallbackJudgeTrends(data);
-      }
+      // Generate additional analysis types
+      const additionalAnalysis = {
+        costEstimate: this.generateCostEstimate(data),
+        riskAssessment: this.generateRiskAssessment(data),
+        settlementAnalysis: this.generateSettlementAnalysis(data),
+        timelineEstimate: this.generateTimelineEstimate(data),
+        financialPrediction: this.generateFinancialPrediction(data),
+        judgeTrends: this.generateJudgeTrends(data),
+        lawUpdates: lawUpdates
+      };
       
       context.data.additionalAnalysis = additionalAnalysis;
       
-      console.log(`✅ Additional analysis completed successfully for case ${caseId}`);
-      console.log('📊 Generated analysis types:', Object.keys(additionalAnalysis));
+      // Track processing stage completion
+      await this.trackProcessingStage(caseId, 'executeAdditionalAnalysis', 'completed', {
+        analysis_types: Object.keys(additionalAnalysis).length,
+        law_updates_count: lawUpdates.length
+      });
       
     } catch (error) {
-      console.error(`❌ Additional analysis generation failed for case ${caseId}:`, error);
+      console.error(`Additional analysis failed for case ${caseId}:`, error);
       
-      // Set fallback additional analysis data
+      // Set fallback analysis data
       context.data.additionalAnalysis = {
         costEstimate: this.getFallbackCostEstimate(data),
         riskAssessment: this.getFallbackRiskAssessment(data),
         settlementAnalysis: this.getFallbackSettlementAnalysis(data),
         timelineEstimate: this.getFallbackTimelineEstimate(data),
         financialPrediction: this.getFallbackFinancialPrediction(data),
-        judgeTrends: this.getFallbackJudgeTrends(data)
+        judgeTrends: this.getFallbackJudgeTrends(data),
+        lawUpdates: []
       };
       
-      // Log error to tracking service
-      await this.errorTrackingService.logProcessingError(caseId, error, {
-        step: 'additionalAnalysis',
-        context: {
-          hasPredictionAnalysis: !!data.predictionAnalysis,
-          hasComplexityScore: !!data.complexityScore,
-          hasCourtListenerCases: !!data.courtListenerCases?.length
-        }
+      // Track processing stage failure
+      await this.trackProcessingStage(caseId, 'executeAdditionalAnalysis', 'failed', {
+        error: error.message
       });
     }
   }
@@ -918,32 +1145,49 @@ class LinearPipelineService {
   async insertFinalData(context) {
     const { caseId, data } = context;
     
+    // Track processing stage
+    await this.trackProcessingStage(caseId, 'insertFinalData', 'started');
+    
     try {
       console.log(`Starting final data insertion for case ${caseId}`);
       
-      // Validate prediction data before database operations
-      if (!data.predictionAnalysis) {
-        throw new Error('Missing prediction analysis data for final database insertion');
-      }
-      
-      console.log('Prediction data to insert:', {
-        outcome_score: data.predictionAnalysis.outcome_prediction_score,
-        settlement_probability: data.predictionAnalysis.settlement_probability,
-        case_strength_score: data.predictionAnalysis.case_strength_score,
-        risk_level: data.predictionAnalysis.risk_level,
-        has_additional_analysis: !!data.additionalAnalysis
-      });
-      
-      // Update case predictions with validation
+      // Insert prediction data
       const predictionData = {
         case_id: caseId,
-        ...data.predictionAnalysis,
+        outcome_prediction_score: data.predictionAnalysis.outcome_prediction_score || 50,
+        confidence_prediction_percentage: data.predictionAnalysis.prediction_confidence || 50,
+        estimated_financial_outcome: data.predictionAnalysis.estimated_financial_outcome || 100000,
+        financial_outcome_range: data.predictionAnalysis.financial_outcome_range || { min: 50000, max: 200000 },
+        litigation_cost_estimate: data.predictionAnalysis.litigation_cost_estimate || 50000,
+        litigation_cost_range: data.predictionAnalysis.litigation_cost_range || { min: 25000, max: 100000 },
+        settlement_success_rate: data.predictionAnalysis.settlement_probability || 50,
+        plaintiff_success: data.predictionAnalysis.plaintiff_success || 50,
+        appeal_after_trial: data.predictionAnalysis.appeal_after_trial || 30,
         case_complexity_score: data.complexityScore || 50,
+        risk_score: data.predictionAnalysis.risk_score || 50,
+        prior_similar_rulings: data.predictionAnalysis.prior_similar_rulings || [],
+        precedent_cases: data.predictionAnalysis.precedent_cases || [],
+        witness_score: data.predictionAnalysis.witness_score || 50,
+        judge_analysis: data.predictionAnalysis.judge_analysis || 'Not available',
+        lawyer_analysis: data.predictionAnalysis.lawyer_analysis || 'Not available',
+        settlement_trial_analysis: data.predictionAnalysis.settlement_trial_analysis || 'Not available',
+        recommended_settlement_window: data.predictionAnalysis.recommended_settlement_window || 'Not specified',
+        primary_strategy: data.predictionAnalysis.primary_strategy || 'Not specified',
+        alternative_approach: data.predictionAnalysis.alternative_approach || 'Not specified',
+        additional_facts_recommendations: data.predictionAnalysis.additional_facts_recommendations || 'Not specified',
+        primary_fact_strength_analysis: data.predictionAnalysis.primary_fact_strength_analysis || 50,
+        fact_strength_analysis: data.predictionAnalysis.fact_strength_analysis || [],
+        average_time_resolution: data.predictionAnalysis.average_time_resolution || 12,
+        resolution_time_range: data.predictionAnalysis.resolution_time_range || { min: 6, max: 18 },
+        average_time_resolution_type: data.predictionAnalysis.average_time_resolution_type || 'months',
+        real_time_law_changes: data.predictionAnalysis.real_time_law_changes || [],
+        analyzed_cases: data.predictionAnalysis.analyzed_cases || [],
+        similar_cases: data.predictionAnalysis.similar_cases || [],
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
       
-      console.log('Inserting prediction data into case_predictions table');
+      console.log('Inserting prediction data');
       const { error: predictionError } = await this.supabase
         .from('case_predictions')
         .upsert(predictionData);
@@ -966,7 +1210,8 @@ class LinearPipelineService {
           { type: 'settlement_analysis', result: data.additionalAnalysis.settlementAnalysis },
           { type: 'timeline_estimate', result: data.additionalAnalysis.timelineEstimate },
           { type: 'financial_prediction', result: data.additionalAnalysis.financialPrediction },
-          { type: 'judge_trends', result: data.additionalAnalysis.judgeTrends }
+          { type: 'judge_trends', result: data.additionalAnalysis.judgeTrends },
+          { type: 'law_updates', result: data.additionalAnalysis.lawUpdates }
         ];
         
         for (const analysis of analysisTypes) {
@@ -1021,6 +1266,12 @@ class LinearPipelineService {
       
       console.log(`Final data insertion completed successfully for case ${caseId}`);
       
+      // Track processing stage completion
+      await this.trackProcessingStage(caseId, 'insertFinalData', 'completed', {
+        predictions_stored: true,
+        analysis_types_stored: data.additionalAnalysis ? Object.keys(data.additionalAnalysis).length : 0
+      });
+      
     } catch (error) {
       console.error(`Final data insertion failed for case ${caseId}:`, error);
       
@@ -1032,6 +1283,11 @@ class LinearPipelineService {
           hasAdditionalAnalysis: !!data.additionalAnalysis,
           predictionFields: data.predictionAnalysis ? Object.keys(data.predictionAnalysis) : []
         }
+      });
+      
+      // Track processing stage failure
+      await this.trackProcessingStage(caseId, 'insertFinalData', 'failed', {
+        error: error.message
       });
       
       throw error;
@@ -1160,6 +1416,38 @@ class LinearPipelineService {
         'Manual review recommended'
       ]
     };
+  }
+
+  // Helper method to get relevant law updates
+  async getRelevantLawUpdates(data) {
+    try {
+      const caseType = data.caseData?.case_type || data.caseEnhancement?.enhanced_case_type;
+      const jurisdiction = data.jurisdictionAnalysis?.jurisdiction;
+      
+      if (!caseType || !jurisdiction) {
+        return [];
+      }
+      
+      // Query law updates table for relevant updates
+      const { data: lawUpdates, error } = await this.supabase
+        .from('law_updates')
+        .select('*')
+        .or(`type.ilike.%${caseType}%,title.ilike.%${caseType}%`)
+        .eq('jurisdiction', jurisdiction)
+        .gte('effective_date', new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString()) // Last year
+        .order('effective_date', { ascending: false })
+        .limit(5);
+      
+      if (error) {
+        console.warn('Failed to fetch law updates:', error);
+        return [];
+      }
+      
+      return lawUpdates || [];
+    } catch (error) {
+      console.warn('Error getting law updates:', error);
+      return [];
+    }
   }
 }
 

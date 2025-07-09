@@ -226,5 +226,54 @@ Respond ONLY in this exact JSON format with the exact field names:
   "alternative_approach": "...",
   "additional_facts_recommendations": "..."
 }`
+  },
+
+  // Case information fusion prompt
+  CASE_INFORMATION_FUSION: {
+    model: 'gpt-4o-mini',
+    temperature: 0.1,
+    prompt: (userProvided, documentExtracted) => `Fuse the following user-provided case information with document-extracted data to create a comprehensive case summary.
+
+User-Provided Information:
+${JSON.stringify(userProvided, null, 2)}
+
+Document-Extracted Information:
+${JSON.stringify(documentExtracted, null, 2)}
+
+Create a fused result that combines and reconciles information from both sources. Return the result as a JSON object with:
+
+- parties: Object with "plaintiffs" and "defendants" arrays (combine from both sources)
+- legal_claims: Array of legal claims (prioritize document-extracted claims)
+- damages_sought: Monetary damages or relief sought
+- key_dates: Object with important dates (combine from both sources)
+- jurisdiction: Court or jurisdiction (prioritize document-extracted)
+- case_number: Case number if present
+- confidence_score: Number between 0-1 indicating confidence in the fusion
+- conflicts: Array of any conflicts found between sources
+- additional_insights: Array of additional insights from the fusion
+
+Return only valid JSON without any additional text.`
+  },
+
+  // Document structure extraction prompt
+  DOCUMENT_STRUCTURE_EXTRACTION: {
+    model: 'gpt-4o-mini',
+    temperature: 0.1,
+    prompt: (text, fileName) => `Analyze the following legal document and extract structured information. Return the result as a JSON object.
+
+Document: ${fileName}
+Content: ${text.substring(0, 8000)}${text.length > 8000 ? '...' : ''}
+
+Extract the following information:
+- document_type: Type of legal document (complaint, answer, motion, order, judgment, settlement, contract, agreement, notice, letter, etc.)
+- parties: Object with "plaintiffs" and "defendants" arrays
+- key_dates: Object with important dates (filing_date, incident_date, etc.)
+- legal_claims: Array of legal claims or causes of action
+- damages_sought: Monetary damages or relief sought
+- key_terms: Array of important legal terms or concepts
+- jurisdiction: Court or jurisdiction mentioned
+- case_number: Case number if present
+
+Return only valid JSON without any additional text.`
   }
 };
