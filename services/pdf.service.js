@@ -50,7 +50,11 @@ class PDFService {
   async uploadFile(filePath) {
     try {
       // For Supabase storage files, we need to download them first
-      const fileBuffer = await this.downloadFromSupabase(filePath);
+      const fileBlob = await this.downloadFromSupabase(filePath);
+      
+      // Convert Blob to Buffer for FormData compatibility
+      const arrayBuffer = await fileBlob.arrayBuffer();
+      const fileBuffer = Buffer.from(arrayBuffer);
       
       const formData = new FormData();
       formData.append('file', fileBuffer, {
