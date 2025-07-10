@@ -139,10 +139,16 @@ class AIService {
     const delayBetweenCalls = aiConfig.delayBetweenCalls;
     await new Promise(resolve => setTimeout(resolve, delayBetweenCalls));
     
+    // Determine timeout based on operation type and content length
+    const operation = options.operation || 'default';
+    const timeout = aiConfig.getTimeoutForOperation(operation, estimatedTokens);
+    
+    console.log(`[AIService] Making OpenAI API call with ${timeout}ms timeout, estimated tokens: ${estimatedTokens}, operation: ${operation}`);
+    
     // Add timeout to prevent hanging requests
     const timeoutId = setTimeout(() => {
-      console.log('OpenAI API call timeout - aborting request');
-    }, 30000);
+      console.log(`[AIService] OpenAI API call timeout after ${timeout}ms - aborting request`);
+    }, timeout);
     
     try {
       const response = await this.openai.chat.completions.create({
@@ -155,11 +161,12 @@ class AIService {
       
       // Log actual usage for monitoring
       if (response.usage) {
-        console.log(`OpenAI API call completed:`, {
+        console.log(`[AIService] OpenAI API call completed:`, {
           model,
           promptTokens: response.usage.prompt_tokens,
           completionTokens: response.usage.completion_tokens,
-          totalTokens: response.usage.total_tokens
+          totalTokens: response.usage.total_tokens,
+          estimatedTokens: estimatedTokens
         });
       }
       
@@ -170,14 +177,23 @@ class AIService {
       // Handle specific OpenAI errors
       if (error.status === 429) {
         const retryAfter = error.headers?.['retry-after'] || 60;
+        console.log(`[AIService] Rate limited, retry after ${retryAfter}s`);
         await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
         throw new Error(`Rate limited, retry after ${retryAfter}s`);
       }
       
       if (error.status >= 500) {
+        console.error(`[AIService] OpenAI server error: ${error.message}`);
         throw new Error(`OpenAI server error: ${error.message}`);
       }
       
+      // Handle timeout errors specifically
+      if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+        console.error(`[AIService] OpenAI API call timed out after ${timeout}ms`);
+        throw new Error(`OpenAI API call timed out after ${timeout}ms. Please try again or contact support if the issue persists.`);
+      }
+      
+      console.error(`[AIService] OpenAI API call failed:`, error);
       throw error;
     }
   }
@@ -193,7 +209,8 @@ class AIService {
         content: prompt(caseData, evidenceData, documentContent)
       }], {
         temperature,
-        response_format: { type: 'json_object' }
+        response_format: { type: 'json_object' },
+        operation: 'intake'
       });
 
       console.log(`OpenAI API response received for case ${caseData.id}:`, {

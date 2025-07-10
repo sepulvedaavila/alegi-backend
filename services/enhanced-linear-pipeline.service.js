@@ -145,8 +145,12 @@ class EnhancedLinearPipelineService {
             continue; // Skip to next document
           }
           
+          // Use the relative path for extraction
+          const filePathToUse = validation.relativePath || document.file_path;
+          console.log(`Using file path for extraction: ${filePathToUse}`);
+          
           // Extract text from PDF
-          const extractedText = await this.pdfService.extractText(document.file_path);
+          const extractedText = await this.pdfService.extractText(filePathToUse);
           
           // Update document with extracted text
           await this.supabase

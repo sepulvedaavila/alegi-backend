@@ -107,12 +107,15 @@ class PDFService {
         throw new Error(validation.error);
       }
 
+      // Use the relative path for Supabase operations
+      const relativePath = validation.relativePath || filePath;
+
       // Check environment variables
       if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
         throw new Error('Supabase environment variables not configured (SUPABASE_URL or SUPABASE_SERVICE_KEY missing)');
       }
 
-      console.log(`[PDFService] Attempting to download file from Supabase: ${filePath}`);
+      console.log(`[PDFService] Attempting to download file from Supabase: ${relativePath}`);
       console.log(`[PDFService] Supabase URL: ${process.env.SUPABASE_URL}`);
       console.log(`[PDFService] Service key configured: ${!!process.env.SUPABASE_SERVICE_KEY}`);
 
@@ -140,16 +143,16 @@ class PDFService {
       }
 
       // Check if file exists before attempting download
-      console.log(`[PDFService] Checking if file exists: ${filePath}`);
+      console.log(`[PDFService] Checking if file exists: ${relativePath}`);
       const { data: fileList, error: listError } = await supabase.storage
         .from('case-files')
-        .list(filePath.split('/').slice(0, -1).join('/'));
+        .list(relativePath.split('/').slice(0, -1).join('/'));
 
       if (listError) {
         console.error('[PDFService] File list error:', listError);
         // Continue anyway, the file might exist
       } else {
-        const fileName = filePath.split('/').pop();
+        const fileName = relativePath.split('/').pop();
         const fileExists = fileList.some(file => file.name === fileName);
         console.log(`[PDFService] File exists check: ${fileExists ? 'Found' : 'Not found'}`);
       }
@@ -157,7 +160,7 @@ class PDFService {
       // Download file from Supabase storage
       const { data, error } = await supabase.storage
         .from('case-files')
-        .download(filePath);
+        .download(relativePath);
 
       if (error) {
         console.error('[PDFService] Supabase download error details:', {
@@ -171,7 +174,7 @@ class PDFService {
         // Provide more specific error messages based on error code
         let errorMessage = error.message || 'Unknown error';
         if (error.code === '404') {
-          errorMessage = `File not found: ${filePath}`;
+          errorMessage = `File not found: ${relativePath}`;
         } else if (error.code === '401') {
           errorMessage = 'Unauthorized access to Supabase storage';
         } else if (error.code === '403') {
@@ -182,10 +185,10 @@ class PDFService {
       }
 
       if (!data) {
-        throw new Error(`No data returned from Supabase for file path: ${filePath}`);
+        throw new Error(`No data returned from Supabase for file path: ${relativePath}`);
       }
 
-      console.log(`[PDFService] Successfully downloaded file from Supabase: ${filePath}`);
+      console.log(`[PDFService] Successfully downloaded file from Supabase: ${relativePath}`);
       return data;
     } catch (error) {
       console.error('[PDFService] Supabase download error:', {
@@ -308,23 +311,42 @@ class PDFService {
       return { valid: false, error: 'File path is required' };
     }
 
+    // Handle full Supabase URLs by extracting the relative path
+    let relativePath = filePath;
+    if (filePath.startsWith('http')) {
+      // Extract path from Supabase URL
+      // URL format: https://project.supabase.co/storage/v1/object/public/bucket/path
+      const urlParts = filePath.split('/');
+      const bucketIndex = urlParts.findIndex(part => part === 'case-files');
+      if (bucketIndex !== -1 && bucketIndex + 1 < urlParts.length) {
+        // Extract everything after the bucket name
+        relativePath = urlParts.slice(bucketIndex + 1).join('/');
+        console.log(`[PDFService] Extracted relative path from URL: ${relativePath}`);
+      } else {
+        return { 
+          valid: false, 
+          error: `Invalid Supabase URL format. Expected URL with case-files bucket, got: ${filePath}` 
+        };
+      }
+    }
+
     // Check if path follows expected format: documents/{caseId}/{fileName}
-    const pathParts = filePath.split('/');
+    const pathParts = relativePath.split('/');
     if (pathParts.length < 3) {
       return { 
         valid: false, 
-        error: `Invalid file path format. Expected: documents/{caseId}/{fileName}, got: ${filePath}` 
+        error: `Invalid file path format. Expected: documents/{caseId}/{fileName}, got: ${relativePath}` 
       };
     }
 
     if (pathParts[0] !== 'documents') {
       return { 
         valid: false, 
-        error: `File path should start with 'documents/', got: ${filePath}` 
+        error: `File path should start with 'documents/', got: ${relativePath}` 
       };
     }
 
-    return { valid: true, pathParts };
+    return { valid: true, pathParts, relativePath };
   }
 
   // Alternative method using direct file upload and text extraction

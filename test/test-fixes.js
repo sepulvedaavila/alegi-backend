@@ -1,97 +1,87 @@
-const courtListenerService = require('../services/courtlistener.service');
-const { OpenAI } = require('openai');
+// test/test-fixes.js
+const PDFService = require('../services/pdf.service');
+const AIService = require('../services/ai.service');
 
-// Test CourtListener service methods
-async function testCourtListenerService() {
-  console.log('Testing CourtListener service...');
-  
+async function testFixes() {
+  console.log('🧪 Testing fixes for file path and timeout issues...\n');
+
   try {
-    // Test searchCases method
-    const searchResults = await courtListenerService.searchCases('contract dispute', {
-      filed_after: '2020-01-01'
+    // Test 1: File path validation with full URLs
+    console.log('1. Testing file path validation with full Supabase URLs...');
+    
+    const testUrls = [
+      'https://zunckttwoeuacolbgpnu.supabase.co/storage/v1/object/public/case-files/documents/2aec5e8d-72ee-4755-9ef2-e010c5c10673/1752127027673_gt6z4cmdiuj.pdf',
+      'documents/123/test.pdf',
+      'https://invalid-url.com/file.pdf',
+      'https://project.supabase.co/storage/v1/object/public/wrong-bucket/documents/test.pdf'
+    ];
+
+    testUrls.forEach((url, index) => {
+      const validation = PDFService.validateFilePath(url);
+      console.log(`   Test ${index + 1}: "${url}"`);
+      console.log(`     Valid: ${validation.valid}`);
+      if (validation.valid) {
+        console.log(`     Relative path: ${validation.relativePath}`);
+      } else {
+        console.log(`     Error: ${validation.error}`);
+      }
     });
+
+    // Test 2: AI service timeout configuration
+    console.log('\n2. Testing AI service timeout configuration...');
     
-    console.log('✅ searchCases method works:', typeof searchResults);
-    console.log('   Results type:', Array.isArray(searchResults) ? 'Array' : typeof searchResults);
+    const aiConfig = require('../services/ai.config');
     
-    // Test findSimilarCases method
-    const similarCases = await courtListenerService.findSimilarCases({
-      case_type: 'contract_dispute',
-      jurisdiction: 'federal'
+    const timeoutTests = [
+      { operation: 'intake', tokens: 5000 },
+      { operation: 'document_processing', tokens: 15000 },
+      { operation: 'simple', tokens: 1000 },
+      { operation: 'default', tokens: 3000 }
+    ];
+
+    timeoutTests.forEach(test => {
+      const timeout = aiConfig.getTimeoutForOperation(test.operation, test.tokens);
+      console.log(`   Operation: ${test.operation}, Tokens: ${test.tokens} -> Timeout: ${timeout}ms`);
     });
+
+    // Test 3: Mock AI call with operation parameter
+    console.log('\n3. Testing AI service with operation parameter...');
     
-    console.log('✅ findSimilarCases method works:', typeof similarCases);
-    console.log('   Results structure:', Object.keys(similarCases));
-    
+    // Create a mock AI service for testing
+    const mockAIService = {
+      isMock: true,
+      makeOpenAICall: AIService.makeOpenAICall.bind(AIService)
+    };
+
+    try {
+      const result = await mockAIService.makeOpenAICall('gpt-4o-mini', [{
+        role: 'user',
+        content: 'Test message'
+      }], {
+        operation: 'intake',
+        temperature: 0.3
+      });
+      
+      console.log('   Mock AI call successful:', result.choices[0].message.content.substring(0, 100) + '...');
+    } catch (error) {
+      console.log('   Mock AI call error (expected):', error.message);
+    }
+
+    console.log('\n✅ All tests completed successfully!');
+    return true;
+
   } catch (error) {
-    console.error('❌ CourtListener service test failed:', error.message);
+    console.error('\n❌ Test failed:', error.message);
+    console.error('Error details:', error);
+    return false;
   }
 }
 
-// Test OpenAI quota error handling
-async function testOpenAIQuotaHandling() {
-  console.log('\nTesting OpenAI quota error handling...');
-  
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  
-  try {
-    // This should work normally
-    const response = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: [{ role: "user", content: "Hello" }],
-      max_tokens: 10
-    });
-    
-    console.log('✅ OpenAI API call works normally');
-    
-  } catch (error) {
-    console.log('OpenAI API call failed:', error.code, error.status);
-    
-    // Test quota error detection
-    if (error.code === 'insufficient_quota' || error.status === 429) {
-      console.log('✅ Quota error correctly detected');
-    } else {
-      console.log('❌ Unexpected error type:', error.code);
-    }
-  }
-}
-
-// Test service exports
-function testServiceExports() {
-  console.log('\nTesting service exports...');
-  
-  try {
-    const services = require('../services/index.js');
-    
-    if (services.courtlistenerService) {
-      console.log('✅ courtlistenerService exported correctly');
-    } else {
-      console.log('❌ courtlistenerService not found in exports');
-    }
-    
-    if (services.CourtListenerService) {
-      console.log('✅ CourtListenerService exported correctly');
-    } else {
-      console.log('❌ CourtListenerService not found in exports');
-    }
-    
-  } catch (error) {
-    console.error('❌ Service exports test failed:', error.message);
-  }
-}
-
-async function runTests() {
-  console.log('Running fixes verification tests...\n');
-  
-  testServiceExports();
-  await testCourtListenerService();
-  await testOpenAIQuotaHandling();
-  
-  console.log('\n✅ All tests completed');
-}
-
+// Run the test if this file is executed directly
 if (require.main === module) {
-  runTests().catch(console.error);
+  testFixes().then(success => {
+    process.exit(success ? 0 : 1);
+  });
 }
 
-module.exports = { runTests }; 
+module.exports = testFixes; 

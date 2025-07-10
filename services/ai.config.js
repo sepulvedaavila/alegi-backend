@@ -29,6 +29,15 @@ module.exports = {
   // Delays between calls
   delayBetweenCalls: 1000, // 1 second
   
+  // Timeout configuration (in milliseconds)
+  timeouts: {
+    default: 60000, // 60 seconds
+    intake: 120000, // 2 minutes for intake analysis
+    document: 180000, // 3 minutes for document processing
+    complex: 150000, // 2.5 minutes for complex operations
+    simple: 45000 // 45 seconds for simple operations
+  },
+  
   // Retry configuration
   retry: {
     maxRetries: 3,
@@ -75,5 +84,26 @@ module.exports = {
       rpm: this.rateLimiting.rpm,
       tpm: this.rateLimiting.tpm
     };
+  },
+
+  // Get timeout for specific operation
+  getTimeoutForOperation(operation, estimatedTokens = 0) {
+    if (operation === 'intake' || operation === 'document_analysis') {
+      return this.timeouts.intake;
+    }
+    
+    if (operation === 'document_processing') {
+      return this.timeouts.document;
+    }
+    
+    if (estimatedTokens > 10000) {
+      return this.timeouts.complex;
+    }
+    
+    if (estimatedTokens < 2000) {
+      return this.timeouts.simple;
+    }
+    
+    return this.timeouts.default;
   }
 };
