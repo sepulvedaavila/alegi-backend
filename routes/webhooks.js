@@ -42,7 +42,7 @@ router.post('/external/case-briefs', verifyExternalWebhook, async (req, res) => 
             .from('case_briefs')
             .update({ 
               processing_status: 'failed',
-              error_message: error.message
+              processing_error: error.message
             })
             .eq('id', record.id);
             
@@ -140,7 +140,7 @@ router.post('/supabase/document-uploaded', verifySupabaseWebhook, async (req, re
             .from('case_briefs')
             .update({ 
               processing_status: 'failed',
-              error_message: error.message
+              processing_error: error.message
             })
             .eq('id', record.case_id);
             
@@ -245,9 +245,9 @@ async function handleNewCaseBrief(caseBrief, res) {
           .from('case_briefs')
           .update({ 
             processing_status: 'failed',
-            error_message: error.message
+            processing_error: error.message
           })
-          .eq('id', caseBrief.id);
+            .eq('id', caseBrief.id);
           
         Sentry.captureException(error, {
           tags: { caseId: caseBrief.id, webhook: 'universal', pipeline: 'enhanced' }
@@ -292,7 +292,7 @@ async function handleNewDocument(document, res) {
             .from('case_briefs')
             .update({ 
               processing_status: 'failed',
-              error_message: error.message
+              processing_error: error.message
             })
             .eq('id', document.case_id);
             

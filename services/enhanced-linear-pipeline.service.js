@@ -15,10 +15,10 @@ class EnhancedLinearPipelineService {
       : null;
     
     // Initialize services
-    this.aiService = new AIService();
-    this.pdfService = new PDFService();
-    this.courtListenerService = new CourtListenerService();
-    this.errorTrackingService = new ErrorTrackingService();
+    this.aiService = AIService; // AIService is already instantiated as singleton
+    this.pdfService = PDFService; // PDFService is already instantiated as singleton
+    this.courtListenerService = CourtListenerService; // CourtListenerService is already instantiated as singleton
+    this.errorTrackingService = ErrorTrackingService; // ErrorTrackingService is already instantiated as singleton
   }
 
   async executeEnhancedPipeline(caseId) {
@@ -689,8 +689,9 @@ class EnhancedLinearPipelineService {
       last_ai_update: new Date().toISOString()
     };
     
+    // Use processing_error column instead of error_message since it doesn't exist
     if (errorMessage) {
-      updateData.error_message = errorMessage;
+      updateData.processing_error = errorMessage;
     }
     
     await this.supabase
@@ -702,16 +703,14 @@ class EnhancedLinearPipelineService {
   async updateProcessingProgress(caseId, currentStep, totalSteps, stepName) {
     if (!this.supabase) return;
     
+    // Update progress in case_briefs table since case_processing_progress doesn't exist
     await this.supabase
-      .from('case_processing_progress')
-      .upsert({
-        case_id: caseId,
+      .from('case_briefs')
+      .update({
         current_step: currentStep,
-        total_steps: totalSteps,
-        current_step_name: stepName,
-        progress_percentage: Math.round((currentStep / totalSteps) * 100),
-        updated_at: new Date().toISOString()
-      });
+        step_completed_at: new Date().toISOString()
+      })
+      .eq('id', caseId);
   }
 
   async searchInternalSimilarCases(caseData, intakeAnalysis) {
