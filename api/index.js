@@ -1076,6 +1076,21 @@ app.get('/api/cases/:caseId/enhanced-status', authenticateJWT, async (req, res) 
   }
 });
 
+// Processing status endpoint for Enhanced ALEGI Pipeline
+app.get('/api/cases/:id/processing-status', authenticateJWT, async (req, res) => {
+  try {
+    const processingStatusHandler = require('./cases/[id]/processing-status');
+    await processingStatusHandler(req, res);
+  } catch (error) {
+    console.error('Processing status endpoint error:', error);
+    res.status(500).json({
+      error: 'Failed to get processing status',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // Trigger analysis for existing cases endpoint
 app.post('/api/cases/:caseId/trigger-analysis', authenticateJWT, async (req, res) => {
   try {

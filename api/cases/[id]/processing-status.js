@@ -1,10 +1,10 @@
-const { validateSupabaseToken } = require('../../../middleware/auth');
+// api/cases/[id]/processing-status.js
 const { createClient } = require('@supabase/supabase-js');
-const { handleError } = require('../../../utils/errorHandler');
+const { validateSupabaseToken } = require('../../../middleware/auth');
 const { applyCorsHeaders } = require('../../../utils/cors-helper');
 
 // Initialize Supabase client
-const supabase = process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY
+const supabase = process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY 
   ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
   : null;
 
@@ -14,171 +14,247 @@ module.exports = async (req, res) => {
     return; // Request was handled (OPTIONS)
   }
 
-  if (req.method !== 'GET') {
-    return res.status(405).json({ error: 'Method not allowed' });
+  // Check service availability
+  if (!supabase) {
+    console.error('Required services not available');
+    return res.status(503).json({ 
+      error: 'Service temporarily unavailable',
+      message: 'Database service is not configured. Please try again later.'
+    });
   }
 
   try {
     const user = await validateSupabaseToken(req);
-    const { id: caseId } = req.query;
+    const { id: caseId } = req.params;
     
     if (!caseId) {
       return res.status(400).json({ error: 'Case ID is required' });
     }
+    
+    console.log(`Processing status request for case ${caseId} by user ${user.id}`);
 
-    // Get case basic information
+    // Get case details and verify ownership
     const { data: caseData, error: caseError } = await supabase
       .from('case_briefs')
-      .select('id, case_name, processing_status, ai_processed, last_ai_update, created_at')
+      .select('*')
       .eq('id', caseId)
       .eq('user_id', user.id)
       .single();
-
+    
     if (caseError || !caseData) {
-      return res.status(404).json({ error: 'Case not found' });
+      return res.status(404).json({ error: 'Case not found or access denied' });
     }
 
-    // Get detailed processing stages
-    const { data: processingStages, error: stagesError } = await supabase
-      .from('case_processing_stages')
+    // Get processing progress
+    const { data: progressData } = await supabase
+      .from('case_processing_progress')
+      .select('*')
+      .eq('case_id', caseId)
+      .single();
+
+    // Get all analysis results
+    const { data: analysisResults } = await supabase
+      .from('case_analysis')
       .select('*')
       .eq('case_id', caseId)
       .order('created_at', { ascending: true });
 
-    if (stagesError) {
-      console.error('Error fetching processing stages:', stagesError);
-    }
-
-    // Get document extraction status
-    const { data: documentExtractions, error: extractionsError } = await supabase
-      .from('case_document_extractions')
-      .select('file_name, processing_status, error_message, created_at')
-      .eq('case_id', caseId);
-
-    if (extractionsError) {
-      console.error('Error fetching document extractions:', extractionsError);
-    }
-
-    // Get data fusion status
-    const { data: dataFusion, error: fusionError } = await supabase
-      .from('case_data_fusion')
-      .select('fusion_status, error_message, created_at, updated_at')
-      .eq('case_id', caseId)
-      .single();
-
-    if (fusionError && fusionError.code !== 'PGRST116') {
-      console.error('Error fetching data fusion:', fusionError);
-    }
-
-    // Get precedent cases count
-    const { count: precedentCount, error: precedentError } = await supabase
-      .from('precedent_cases')
-      .select('*', { count: 'exact', head: true })
-      .eq('case_id', caseId);
-
-    if (precedentError) {
-      console.error('Error fetching precedent cases count:', precedentError);
-    }
-
+    // Determine processing status
+    const processingStatus = determineProcessingStatus(caseData, progressData, analysisResults);
+    
+    // Get feature completion status
+    const featureStatus = getFeatureCompletionStatus(analysisResults);
+    
     // Calculate overall progress
-    const expectedStages = [
-      'extractPDF',
-      'executeIntakeAnalysis',
-      'insertIntakeData',
-      'executeJurisdictionAnalysis',
-      'executeCaseEnhancement',
-      'insertEnhancementData',
-      'searchCourtListener',
-      'fetchOpinions',
-      'executeCourtOpinionAnalysis',
-      'insertOpinionData',
-      'executeComplexityScore',
-      'executePredictionAnalysis',
-      'executeAdditionalAnalysis',
-      'insertFinalData'
-    ];
+    const overallProgress = calculateOverallProgress(progressData, featureStatus);
+    
+    // Get estimated time remaining
+    const estimatedTimeRemaining = calculateEstimatedTimeRemaining(progressData, caseData);
 
-    const completedStages = processingStages?.filter(stage => 
-      stage.stage_status === 'completed'
-    ) || [];
-
-    const failedStages = processingStages?.filter(stage => 
-      stage.stage_status === 'failed'
-    ) || [];
-
-    const progressPercentage = Math.round((completedStages.length / expectedStages.length) * 100);
-
-    // Determine current stage
-    let currentStage = 'pending';
-    if (completedStages.length > 0) {
-      const lastCompletedStage = completedStages[completedStages.length - 1];
-      const stageIndex = expectedStages.indexOf(lastCompletedStage.stage_name);
-      if (stageIndex < expectedStages.length - 1) {
-        currentStage = expectedStages[stageIndex + 1];
-      } else {
-        currentStage = 'completed';
-      }
-    }
-
-    // Build detailed status response
-    const status = {
-      caseId: caseData.id,
+    const response = {
+      caseId: caseId,
       caseName: caseData.case_name,
-      overallStatus: caseData.processing_status,
-      aiProcessed: caseData.ai_processed,
-      lastUpdate: caseData.last_ai_update,
-      createdAt: caseData.created_at,
-      progress: {
-        percentage: progressPercentage,
-        completedStages: completedStages.length,
-        totalStages: expectedStages.length,
-        currentStage: currentStage
-      },
-      stages: processingStages?.map(stage => ({
-        name: stage.stage_name,
-        status: stage.stage_status,
-        startedAt: stage.started_at,
-        completedAt: stage.completed_at,
-        result: stage.stage_result,
-        error: stage.error_message
-      })) || [],
-      documentProcessing: {
-        totalDocuments: documentExtractions?.length || 0,
-        completed: documentExtractions?.filter(d => d.processing_status === 'completed').length || 0,
-        failed: documentExtractions?.filter(d => d.processing_status === 'failed').length || 0,
-        extractions: documentExtractions?.map(d => ({
-          fileName: d.file_name,
-          status: d.processing_status,
-          error: d.error_message,
-          createdAt: d.created_at
-        })) || []
-      },
-      dataFusion: dataFusion ? {
-        status: dataFusion.fusion_status,
-        error: dataFusion.error_message,
-        createdAt: dataFusion.created_at,
-        updatedAt: dataFusion.updated_at
-      } : null,
-      externalData: {
-        precedentCases: precedentCount || 0,
-        courtListenerCases: completedStages.find(s => s.name === 'searchCourtListener')?.result?.cases_found || 0
-      },
-      errors: failedStages.map(stage => ({
-        stage: stage.stage_name,
-        error: stage.error_message,
-        timestamp: stage.completed_at
-      }))
+      processingStatus: processingStatus.status,
+      overallProgress: overallProgress,
+      currentStep: progressData?.current_step_name || 'Not started',
+      totalSteps: progressData?.total_steps || 13,
+      currentStepNumber: progressData?.current_step || 0,
+      features: featureStatus,
+      estimatedTimeRemaining: estimatedTimeRemaining,
+      lastUpdated: caseData.last_ai_update,
+      errorMessage: caseData.error_message,
+      processingType: caseData.processing_type || 'enhanced',
+      pipeline: 'enhanced-alegi',
+      timestamp: new Date().toISOString()
     };
 
-    return res.json({
-      success: true,
-      status
+    // Add detailed progress if available
+    if (progressData) {
+      response.progressDetails = {
+        currentStep: progressData.current_step_name,
+        progressPercentage: progressData.progress_percentage,
+        lastUpdated: progressData.updated_at
+      };
+    }
+
+    // Add analysis summary if completed
+    if (processingStatus.status === 'completed') {
+      response.analysisSummary = {
+        totalAnalyses: analysisResults?.length || 0,
+        completedFeatures: Object.values(featureStatus).filter(f => f.completed).length,
+        totalFeatures: Object.keys(featureStatus).length
+      };
+    }
+
+    console.log(`Processing status retrieved for case ${caseId}:`, {
+      status: processingStatus.status,
+      progress: overallProgress,
+      featuresCompleted: Object.values(featureStatus).filter(f => f.completed).length
     });
 
+    return res.status(200).json(response);
+
   } catch (error) {
-    handleError(error, res, { 
-      operation: 'processing_status',
-      caseId: req.query.id 
+    console.error('Processing status error:', error);
+    
+    // Handle specific error types
+    if (error.message.includes('Unauthorized')) {
+      return res.status(401).json({ 
+        error: 'Unauthorized',
+        message: 'Invalid or missing authentication token'
+      });
+    }
+    
+    if (error.message.includes('Case not found')) {
+      return res.status(404).json({ 
+        error: 'Case not found',
+        message: 'The specified case could not be found'
+      });
+    }
+    
+    return res.status(500).json({
+      error: 'Failed to retrieve processing status',
+      message: error.message,
+      timestamp: new Date().toISOString()
     });
   }
-}; 
+};
+
+function determineProcessingStatus(caseData, progressData, analysisResults) {
+  // Check for failed status
+  if (caseData.processing_status === 'failed') {
+    return {
+      status: 'failed',
+      message: caseData.error_message || 'Processing failed',
+      canRetry: true
+    };
+  }
+
+  // Check for completed status
+  if (caseData.processing_status === 'completed') {
+    return {
+      status: 'completed',
+      message: 'Processing completed successfully',
+      canRetry: false
+    };
+  }
+
+  // Check for processing status
+  if (caseData.processing_status === 'processing') {
+    if (progressData) {
+      return {
+        status: 'processing',
+        message: `Processing in progress - Step ${progressData.current_step}/${progressData.total_steps}`,
+        canRetry: false
+      };
+    } else {
+      return {
+        status: 'processing',
+        message: 'Processing in progress',
+        canRetry: false
+      };
+    }
+  }
+
+  // Check for pending status
+  if (caseData.processing_status === 'pending') {
+    return {
+      status: 'pending',
+      message: 'Processing queued',
+      canRetry: false
+    };
+  }
+
+  // Default to not started
+  return {
+    status: 'not_started',
+    message: 'Processing not started',
+    canRetry: true
+  };
+}
+
+function getFeatureCompletionStatus(analysisResults) {
+  const features = {
+    outcomeProbability: { completed: false, analysisType: 'outcome_probability' },
+    settlementAnalysis: { completed: false, analysisType: 'settlement_analysis' },
+    precedentAnalysis: { completed: false, analysisType: 'precedent' },
+    judgeTrends: { completed: false, analysisType: 'judge_trends' },
+    riskAssessment: { completed: false, analysisType: 'risk_assessment' },
+    costEstimator: { completed: false, analysisType: 'cost_estimate' },
+    financialPrediction: { completed: false, analysisType: 'financial_prediction' },
+    timelineEstimate: { completed: false, analysisType: 'timeline_estimate' },
+    similarCases: { completed: false, analysisType: 'similar_cases' },
+    lawUpdates: { completed: false, analysisType: 'law_updates' },
+    comprehensive: { completed: false, analysisType: 'comprehensive' }
+  };
+
+  if (analysisResults) {
+    analysisResults.forEach(analysis => {
+      Object.values(features).forEach(feature => {
+        if (feature.analysisType === analysis.analysis_type) {
+          feature.completed = true;
+          feature.lastUpdated = analysis.created_at;
+          feature.dataAvailable = true;
+        }
+      });
+    });
+  }
+
+  return features;
+}
+
+function calculateOverallProgress(progressData, featureStatus) {
+  if (progressData) {
+    return progressData.progress_percentage || 0;
+  }
+
+  // Calculate based on completed features
+  const completedFeatures = Object.values(featureStatus).filter(f => f.completed).length;
+  const totalFeatures = Object.keys(featureStatus).length;
+  
+  return Math.round((completedFeatures / totalFeatures) * 100);
+}
+
+function calculateEstimatedTimeRemaining(progressData, caseData) {
+  if (!progressData || caseData.processing_status === 'completed') {
+    return null;
+  }
+
+  const totalSteps = progressData.total_steps || 13;
+  const currentStep = progressData.current_step || 0;
+  const remainingSteps = totalSteps - currentStep;
+  
+  // Estimate 30-60 seconds per step
+  const averageTimePerStep = 45; // seconds
+  const estimatedSeconds = remainingSteps * averageTimePerStep;
+  
+  if (estimatedSeconds < 60) {
+    return `${estimatedSeconds} seconds`;
+  } else if (estimatedSeconds < 3600) {
+    const minutes = Math.ceil(estimatedSeconds / 60);
+    return `${minutes} minutes`;
+  } else {
+    const hours = Math.ceil(estimatedSeconds / 3600);
+    return `${hours} hours`;
+  }
+} 
