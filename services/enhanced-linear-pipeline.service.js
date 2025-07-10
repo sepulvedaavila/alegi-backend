@@ -362,15 +362,15 @@ class EnhancedLinearPipelineService {
     
     console.log(`⚠️ Performing risk assessment for case ${caseId}`);
     
-    const { caseData, intakeAnalysis, features } = context.data;
+    const { caseData, intakeAnalysis } = context.data;
     
     // Comprehensive risk analysis using all available data
     const riskAnalysis = await this.aiService.executeRiskAssessment({
       caseData,
       intakeAnalysis,
-      precedentAnalysis: features.precedentAnalysis,
-      judgeTrends: features.judgeTrends,
-      similarCases: features.similarCases
+      precedentAnalysis: context.features.precedentAnalysis,
+      judgeTrends: context.features.judgeTrends,
+      similarCases: context.features.similarCases
     });
     
     // Store risk assessment
@@ -401,15 +401,15 @@ class EnhancedLinearPipelineService {
     
     console.log(`💰 Estimating litigation costs for case ${caseId}`);
     
-    const { caseData, intakeAnalysis, features } = context.data;
+    const { caseData, intakeAnalysis } = context.data;
     
     // Cost estimation using historical data and case characteristics
     const costEstimate = await this.aiService.executeCostEstimation({
       caseData,
       intakeAnalysis,
-      riskAssessment: features.riskAssessment,
-      similarCases: features.similarCases,
-      judgeTrends: features.judgeTrends
+      riskAssessment: context.features.riskAssessment,
+      similarCases: context.features.similarCases,
+      judgeTrends: context.features.judgeTrends
     });
     
     // Store cost estimate
@@ -442,15 +442,15 @@ class EnhancedLinearPipelineService {
     
     console.log(`💵 Predicting financial outcomes for case ${caseId}`);
     
-    const { caseData, intakeAnalysis, features } = context.data;
+    const { caseData, intakeAnalysis } = context.data;
     
     // Financial prediction using all available data
     const financialPrediction = await this.aiService.executeFinancialPrediction({
       caseData,
       intakeAnalysis,
-      similarCases: features.similarCases,
-      judgeTrends: features.judgeTrends,
-      riskAssessment: features.riskAssessment
+      similarCases: context.features.similarCases,
+      judgeTrends: context.features.judgeTrends,
+      riskAssessment: context.features.riskAssessment
     });
     
     // Store financial prediction
@@ -481,17 +481,17 @@ class EnhancedLinearPipelineService {
     
     console.log(`⚖️ Analyzing settlement vs trial options for case ${caseId}`);
     
-    const { caseData, intakeAnalysis, features } = context.data;
+    const { caseData, intakeAnalysis } = context.data;
     
     // Comprehensive settlement vs trial analysis
     const settlementAnalysis = await this.aiService.executeSettlementAnalysis({
       caseData,
       intakeAnalysis,
-      financialPrediction: features.financialPrediction,
-      costEstimator: features.costEstimator,
-      riskAssessment: features.riskAssessment,
-      judgeTrends: features.judgeTrends,
-      similarCases: features.similarCases
+      financialPrediction: context.features.financialPrediction,
+      costEstimator: context.features.costEstimator,
+      riskAssessment: context.features.riskAssessment,
+      judgeTrends: context.features.judgeTrends,
+      similarCases: context.features.similarCases
     });
     
     // Store settlement analysis
@@ -524,17 +524,17 @@ class EnhancedLinearPipelineService {
     
     console.log(`📊 Calculating outcome probability score for case ${caseId}`);
     
-    const { caseData, intakeAnalysis, features } = context.data;
+    const { caseData, intakeAnalysis } = context.data;
     
     // Calculate comprehensive outcome probability
     const outcomeProbability = await this.aiService.executeOutcomeProbability({
       caseData,
       intakeAnalysis,
-      precedentAnalysis: features.precedentAnalysis,
-      judgeTrends: features.judgeTrends,
-      riskAssessment: features.riskAssessment,
-      similarCases: features.similarCases,
-      settlementAnalysis: features.settlementAnalysis
+      precedentAnalysis: context.features.precedentAnalysis,
+      judgeTrends: context.features.judgeTrends,
+      riskAssessment: context.features.riskAssessment,
+      similarCases: context.features.similarCases,
+      settlementAnalysis: context.features.settlementAnalysis
     });
     
     // Store outcome probability
@@ -567,16 +567,16 @@ class EnhancedLinearPipelineService {
     
     console.log(`⏰ Estimating resolution timeline for case ${caseId}`);
     
-    const { caseData, intakeAnalysis, features } = context.data;
+    const { caseData, intakeAnalysis } = context.data;
     
     // Timeline estimation using all available data
     const timelineEstimate = await this.aiService.executeTimelineEstimation({
       caseData,
       intakeAnalysis,
-      judgeTrends: features.judgeTrends,
-      similarCases: features.similarCases,
-      riskAssessment: features.riskAssessment,
-      settlementAnalysis: features.settlementAnalysis
+      judgeTrends: context.features.judgeTrends,
+      similarCases: context.features.similarCases,
+      riskAssessment: context.features.riskAssessment,
+      settlementAnalysis: context.features.settlementAnalysis
     });
     
     // Store timeline estimate

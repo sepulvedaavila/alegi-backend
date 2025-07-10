@@ -55,6 +55,31 @@ class ErrorTrackingService {
     return this.errors.filter(error => error.type === type);
   }
 
+  async logProcessingError(caseId, error, context = {}) {
+    const errorEntry = {
+      timestamp: new Date().toISOString(),
+      caseId: caseId,
+      message: error.message,
+      stack: error.stack,
+      context: context,
+      type: 'processing_error'
+    };
+
+    this.errors.push(errorEntry);
+
+    // Keep only the last maxErrors
+    if (this.errors.length > this.maxErrors) {
+      this.errors = this.errors.slice(-this.maxErrors);
+    }
+
+    // Log to console in development
+    if (process.env.NODE_ENV !== 'production') {
+      console.error('Processing error captured:', errorEntry);
+    }
+
+    return errorEntry;
+  }
+
   clearErrors() {
     this.errors = [];
   }

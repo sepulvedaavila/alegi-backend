@@ -2,7 +2,7 @@
 const OpenAI = require('openai');
 const Sentry = require('@sentry/node');
 const courtListenerService = require('./courtlistener.service');
-const { AI_PROMPTS } = require('./ai.prompts');
+const { AI_PROMPTS } = require('./ai-prompts.service');
 const aiConfig = require('./ai.config');
 
 class AIService {
