@@ -222,21 +222,156 @@ class CourtListenerService {
     }
   }
 
-  // Alias for findSimilarCases to match the linear pipeline interface
-  async searchSimilarCases(caseData, intakeAnalysis, options = {}) {
+  // Search for judge-specific trends
+  async searchJudgeTrends(judgeName, courtName, caseType) {
     try {
-      // If no API key, return mock data instead of failing
       if (!this.apiKey) {
-        console.warn('CourtListener API key not found - returning mock data');
-        return this.getMockSimilarCases(caseData);
+        console.warn('CourtListener API key not found - returning mock judge trends');
+        return this.getMockJudgeTrends(judgeName, courtName, caseType);
       }
 
       const searchParams = {
-        q: this.buildSearchQuery(caseData),
+        q: `judge:"${judgeName}" AND court:"${courtName}"`,
+        type: 'o', // opinions
+        order_by: 'dateFiled desc',
+        page_size: 20
+      };
+
+      if (caseType) {
+        searchParams.q += ` AND "${caseType}"`;
+      }
+
+      const results = await this.makeAPICall('search/', searchParams);
+      return this.processJudgeTrends(results, judgeName);
+    } catch (error) {
+      console.error('Judge trends search failed:', error);
+      
+      Sentry.captureException(error, {
+        tags: { service: 'courtlistener', operation: 'searchJudgeTrends' },
+        extra: { judgeName, courtName, caseType }
+      });
+
+      return this.getMockJudgeTrends(judgeName, courtName, caseType);
+    }
+  }
+
+  processJudgeTrends(results, judgeName) {
+    const cases = results.results || [];
+    
+    // Calculate trends
+    const totalCases = cases.length;
+    const summaryJudgmentCases = cases.filter(c => 
+      c.caseName?.toLowerCase().includes('summary judgment') ||
+      c.description?.toLowerCase().includes('summary judgment')
+    ).length;
+    
+    const successfulCases = cases.filter(c => 
+      c.description?.toLowerCase().includes('granted') ||
+      c.description?.toLowerCase().includes('favorable')
+    ).length;
+    
+    // Calculate average timeline (simplified)
+    const timelines = cases.map(c => {
+      if (c.dateFiled && c.dateTerminated) {
+        const filed = new Date(c.dateFiled);
+        const terminated = new Date(c.dateTerminated);
+        return Math.floor((terminated - filed) / (1000 * 60 * 60 * 24)); // days
+      }
+      return null;
+    }).filter(t => t !== null);
+    
+    const averageTimeline = timelines.length > 0 
+      ? Math.floor(timelines.reduce((a, b) => a + b, 0) / timelines.length)
+      : 365; // default to 1 year
+    
+    return {
+      judgeName,
+      totalCases,
+      summaryJudgmentRate: totalCases > 0 ? Math.round((summaryJudgmentCases / totalCases) * 100) : 0,
+      successRate: totalCases > 0 ? Math.round((successfulCases / totalCases) * 100) : 0,
+      averageTimeline,
+      recentCases: cases.slice(0, 5),
+      rulingPatterns: this.identifyRulingPatterns(cases)
+    };
+  }
+
+  identifyRulingPatterns(cases) {
+    const patterns = [];
+    
+    // Analyze common ruling patterns
+    const rulingKeywords = {
+      'summary_judgment': ['summary judgment', 'motion for summary judgment'],
+      'dismissal': ['dismissed', 'dismissal', 'motion to dismiss'],
+      'settlement': ['settlement', 'settled', 'agreement'],
+      'trial': ['trial', 'verdict', 'jury'],
+      'appeal': ['appeal', 'appellate', 'reversed', 'affirmed']
+    };
+    
+    Object.entries(rulingKeywords).forEach(([pattern, keywords]) => {
+      const matchingCases = cases.filter(c => 
+        keywords.some(keyword => 
+          c.description?.toLowerCase().includes(keyword) ||
+          c.caseName?.toLowerCase().includes(keyword)
+        )
+      );
+      
+      if (matchingCases.length > 0) {
+        patterns.push({
+          pattern_type: pattern,
+          frequency: Math.round((matchingCases.length / cases.length) * 100),
+          description: `${pattern.replace('_', ' ')} pattern`,
+          cases: matchingCases.length
+        });
+      }
+    });
+    
+    return patterns;
+  }
+
+  getMockJudgeTrends(judgeName, courtName, caseType) {
+    return {
+      judgeName,
+      totalCases: 15,
+      summaryJudgmentRate: 25,
+      successRate: 60,
+      averageTimeline: 420,
+      recentCases: [],
+      rulingPatterns: [
+        {
+          pattern_type: 'summary_judgment',
+          frequency: 25,
+          description: 'summary judgment pattern',
+          cases: 4
+        },
+        {
+          pattern_type: 'settlement',
+          frequency: 40,
+          description: 'settlement pattern',
+          cases: 6
+        }
+      ],
+      mock: true,
+      message: 'CourtListener service unavailable - using mock judge trends'
+    };
+  }
+
+  // Enhanced search for similar cases with more parameters
+  async searchSimilarCases(caseData, intakeAnalysis, options = {}) {
+    try {
+      if (!this.apiKey) {
+        console.warn('CourtListener API key not found - returning mock similar cases');
+        return this.getMockSimilarCases(caseData);
+      }
+
+      // Build enhanced search query
+      let searchQuery = this.buildEnhancedSearchQuery(caseData, intakeAnalysis);
+      
+      const searchParams = {
+        q: searchQuery,
         type: 'o', // opinions
         filed_after: this.getDateRange(caseData),
         order_by: 'score desc',
-        page_size: options.enhanced ? 20 : 10
+        page_size: options.enhanced ? 25 : 15
       };
 
       // Use centralized court mapping
@@ -247,25 +382,55 @@ class CourtListenerService {
         }
       }
 
-      // Add intake analysis to search query if available
-      if (intakeAnalysis && intakeAnalysis.legal_issues) {
-        searchParams.q += ' ' + intakeAnalysis.legal_issues.join(' ');
+      // Add filters based on intake analysis
+      if (intakeAnalysis?.case_metadata?.case_type) {
+        searchParams.q += ' ' + intakeAnalysis.case_metadata.case_type.join(' ');
+      }
+
+      if (intakeAnalysis?.case_metadata?.issue) {
+        searchParams.q += ' ' + intakeAnalysis.case_metadata.issue.join(' ');
       }
 
       const results = await this.makeAPICall('search/', searchParams);
       return this.processSimilarCases(results);
     } catch (error) {
-      console.error('CourtListener search failed:', error);
+      console.error('Enhanced similar cases search failed:', error);
       
-      // Report to Sentry
       Sentry.captureException(error, {
         tags: { service: 'courtlistener', operation: 'searchSimilarCases' },
         extra: { caseData, intakeAnalysis, options }
       });
 
-      // Return fallback data instead of failing
       return this.getMockSimilarCases(caseData);
     }
+  }
+
+  buildEnhancedSearchQuery(caseData, intakeAnalysis) {
+    const searchTerms = [
+      caseData.case_type,
+      caseData.cause_of_action,
+      caseData.jurisdiction
+    ].filter(Boolean);
+    
+    // Add intake analysis terms
+    if (intakeAnalysis?.case_metadata?.issue) {
+      searchTerms.push(...intakeAnalysis.case_metadata.issue);
+    }
+    
+    if (intakeAnalysis?.case_metadata?.case_type) {
+      searchTerms.push(...intakeAnalysis.case_metadata.case_type);
+    }
+    
+    // Add parties if available
+    if (intakeAnalysis?.parties?.plaintiffs) {
+      searchTerms.push(...intakeAnalysis.parties.plaintiffs);
+    }
+    
+    if (intakeAnalysis?.parties?.defendants) {
+      searchTerms.push(...intakeAnalysis.parties.defendants);
+    }
+    
+    return searchTerms.join(' ');
   }
 
   getMockOpinions(caseId) {

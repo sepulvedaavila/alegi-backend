@@ -453,6 +453,365 @@ class AIService {
     }
   }
 
+  // Enhanced ALEGI Pipeline Methods
+
+  // Precedent Analysis - Feature #3
+  async executePrecedentAnalysis(caseData, precedents, intakeAnalysis) {
+    try {
+      const { model, temperature, prompt } = AI_PROMPTS.PRECEDENT_ANALYSIS;
+      
+      const response = await this.makeOpenAICall(model, [{
+        role: 'user',
+        content: prompt(caseData, precedents, intakeAnalysis)
+      }], {
+        temperature,
+        response_format: { type: 'json_object' }
+      });
+
+      const result = JSON.parse(response.choices[0].message.content);
+      console.log('Precedent analysis completed:', { caseId: caseData.id });
+      
+      return result;
+    } catch (error) {
+      console.error('Precedent analysis error:', error);
+      Sentry.captureException(error, {
+        tags: { service: 'ai', operation: 'executePrecedentAnalysis' },
+        extra: { caseId: caseData.id }
+      });
+      
+      return {
+        keyDecisions: [],
+        influenceScore: 0,
+        relevanceScore: 0,
+        summary: 'Precedent analysis temporarily unavailable',
+        error: error.message
+      };
+    }
+  }
+
+  // Judicial Analysis - Feature #4
+  async executeJudicialAnalysis(caseData, judgeTrends, intakeAnalysis) {
+    try {
+      const { model, temperature, prompt } = AI_PROMPTS.JUDICIAL_ANALYSIS;
+      
+      const response = await this.makeOpenAICall(model, [{
+        role: 'user',
+        content: prompt(caseData, judgeTrends, intakeAnalysis)
+      }], {
+        temperature,
+        response_format: { type: 'json_object' }
+      });
+
+      const result = JSON.parse(response.choices[0].message.content);
+      console.log('Judicial analysis completed:', { caseId: caseData.id });
+      
+      return result;
+    } catch (error) {
+      console.error('Judicial analysis error:', error);
+      Sentry.captureException(error, {
+        tags: { service: 'ai', operation: 'executeJudicialAnalysis' },
+        extra: { caseId: caseData.id }
+      });
+      
+      return {
+        summaryJudgmentRate: 0,
+        averageTimeline: 0,
+        successRate: 0,
+        rulingPatterns: [],
+        recommendations: [],
+        error: error.message
+      };
+    }
+  }
+
+  // Similar Case Analysis - Feature #10
+  async executeSimilarCaseAnalysis(caseData, similarCases, intakeAnalysis) {
+    try {
+      const { model, temperature, prompt } = AI_PROMPTS.SIMILAR_CASE_ANALYSIS;
+      
+      const response = await this.makeOpenAICall(model, [{
+        role: 'user',
+        content: prompt(caseData, similarCases, intakeAnalysis)
+      }], {
+        temperature,
+        response_format: { type: 'json_object' }
+      });
+
+      const result = JSON.parse(response.choices[0].message.content);
+      console.log('Similar case analysis completed:', { caseId: caseData.id });
+      
+      return result;
+    } catch (error) {
+      console.error('Similar case analysis error:', error);
+      Sentry.captureException(error, {
+        tags: { service: 'ai', operation: 'executeSimilarCaseAnalysis' },
+        extra: { caseId: caseData.id }
+      });
+      
+      return {
+        closestMatches: [],
+        outcomePatterns: [],
+        similarityScores: [],
+        error: error.message
+      };
+    }
+  }
+
+  // Risk Assessment - Feature #5
+  async executeRiskAssessment(data) {
+    try {
+      const { model, temperature, prompt } = AI_PROMPTS.RISK_ASSESSMENT;
+      
+      const response = await this.makeOpenAICall(model, [{
+        role: 'user',
+        content: prompt(data)
+      }], {
+        temperature,
+        response_format: { type: 'json_object' }
+      });
+
+      const result = JSON.parse(response.choices[0].message.content);
+      console.log('Risk assessment completed:', { caseId: data.caseData.id });
+      
+      return result;
+    } catch (error) {
+      console.error('Risk assessment error:', error);
+      Sentry.captureException(error, {
+        tags: { service: 'ai', operation: 'executeRiskAssessment' },
+        extra: { caseId: data.caseData.id }
+      });
+      
+      return {
+        overallRiskScore: 50,
+        riskLevel: 'medium',
+        weaknesses: [],
+        strengths: [],
+        recommendations: [],
+        riskFactors: [],
+        error: error.message
+      };
+    }
+  }
+
+  // Cost Estimation - Feature #6
+  async executeCostEstimation(data) {
+    try {
+      const { model, temperature, prompt } = AI_PROMPTS.COST_ESTIMATION;
+      
+      const response = await this.makeOpenAICall(model, [{
+        role: 'user',
+        content: prompt(data)
+      }], {
+        temperature,
+        response_format: { type: 'json_object' }
+      });
+
+      const result = JSON.parse(response.choices[0].message.content);
+      console.log('Cost estimation completed:', { caseId: data.caseData.id });
+      
+      return result;
+    } catch (error) {
+      console.error('Cost estimation error:', error);
+      Sentry.captureException(error, {
+        tags: { service: 'ai', operation: 'executeCostEstimation' },
+        extra: { caseId: data.caseData.id }
+      });
+      
+      return {
+        totalEstimatedCost: 0,
+        breakdown: {},
+        attorneyFees: 0,
+        courtCosts: 0,
+        expertWitnessFees: 0,
+        otherExpenses: 0,
+        costRange: { low: 0, high: 0 },
+        confidence: 'medium',
+        error: error.message
+      };
+    }
+  }
+
+  // Financial Prediction - Feature #7
+  async executeFinancialPrediction(data) {
+    try {
+      const { model, temperature, prompt } = AI_PROMPTS.FINANCIAL_PREDICTION;
+      
+      const response = await this.makeOpenAICall(model, [{
+        role: 'user',
+        content: prompt(data)
+      }], {
+        temperature,
+        response_format: { type: 'json_object' }
+      });
+
+      const result = JSON.parse(response.choices[0].message.content);
+      console.log('Financial prediction completed:', { caseId: data.caseData.id });
+      
+      return result;
+    } catch (error) {
+      console.error('Financial prediction error:', error);
+      Sentry.captureException(error, {
+        tags: { service: 'ai', operation: 'executeFinancialPrediction' },
+        extra: { caseId: data.caseData.id }
+      });
+      
+      return {
+        settlementRange: { low: 0, likely: 0, high: 0 },
+        verdictRange: { low: 0, likely: 0, high: 0 },
+        confidence: 'medium',
+        factors: [],
+        methodology: '',
+        comparableCases: [],
+        error: error.message
+      };
+    }
+  }
+
+  // Settlement Analysis - Feature #2
+  async executeSettlementAnalysis(data) {
+    try {
+      const { model, temperature, prompt } = AI_PROMPTS.SETTLEMENT_ANALYSIS;
+      
+      const response = await this.makeOpenAICall(model, [{
+        role: 'user',
+        content: prompt(data)
+      }], {
+        temperature,
+        response_format: { type: 'json_object' }
+      });
+
+      const result = JSON.parse(response.choices[0].message.content);
+      console.log('Settlement analysis completed:', { caseId: data.caseData.id });
+      
+      return result;
+    } catch (error) {
+      console.error('Settlement analysis error:', error);
+      Sentry.captureException(error, {
+        tags: { service: 'ai', operation: 'executeSettlementAnalysis' },
+        extra: { caseId: data.caseData.id }
+      });
+      
+      return {
+        recommendation: 'neutral',
+        settlementProbability: 50,
+        trialProbability: 50,
+        settlementAdvantages: [],
+        trialAdvantages: [],
+        costComparison: {},
+        timelineComparison: {},
+        riskComparison: {},
+        error: error.message
+      };
+    }
+  }
+
+  // Outcome Probability - Feature #1
+  async executeOutcomeProbability(data) {
+    try {
+      const { model, temperature, prompt } = AI_PROMPTS.OUTCOME_PROBABILITY;
+      
+      const response = await this.makeOpenAICall(model, [{
+        role: 'user',
+        content: prompt(data)
+      }], {
+        temperature,
+        response_format: { type: 'json_object' }
+      });
+
+      const result = JSON.parse(response.choices[0].message.content);
+      console.log('Outcome probability completed:', { caseId: data.caseData.id });
+      
+      return result;
+    } catch (error) {
+      console.error('Outcome probability error:', error);
+      Sentry.captureException(error, {
+        tags: { service: 'ai', operation: 'executeOutcomeProbability' },
+        extra: { caseId: data.caseData.id }
+      });
+      
+      return {
+        successProbability: 50,
+        failureProbability: 50,
+        settlementProbability: 50,
+        confidence: 'medium',
+        factors: {},
+        methodology: '',
+        riskLevel: 'medium',
+        caseStrengthScore: 50,
+        error: error.message
+      };
+    }
+  }
+
+  // Timeline Estimation - Feature #8
+  async executeTimelineEstimation(data) {
+    try {
+      const { model, temperature, prompt } = AI_PROMPTS.TIMELINE_ESTIMATION;
+      
+      const response = await this.makeOpenAICall(model, [{
+        role: 'user',
+        content: prompt(data)
+      }], {
+        temperature,
+        response_format: { type: 'json_object' }
+      });
+
+      const result = JSON.parse(response.choices[0].message.content);
+      console.log('Timeline estimation completed:', { caseId: data.caseData.id });
+      
+      return result;
+    } catch (error) {
+      console.error('Timeline estimation error:', error);
+      Sentry.captureException(error, {
+        tags: { service: 'ai', operation: 'executeTimelineEstimation' },
+        extra: { caseId: data.caseData.id }
+      });
+      
+      return {
+        estimatedDuration: 0,
+        durationRange: { min: 0, max: 0 },
+        keyMilestones: [],
+        potentialDelays: [],
+        confidence: 'medium',
+        methodology: '',
+        error: error.message
+      };
+    }
+  }
+
+  // Comprehensive Analysis - Final Integration
+  async executeComprehensiveAnalysis(data) {
+    try {
+      const { model, temperature, prompt } = AI_PROMPTS.COMPREHENSIVE_ANALYSIS;
+      
+      const response = await this.makeOpenAICall(model, [{
+        role: 'user',
+        content: prompt(data)
+      }], {
+        temperature,
+        response_format: { type: 'json_object' }
+      });
+
+      const result = JSON.parse(response.choices[0].message.content);
+      console.log('Comprehensive analysis completed:', { caseId: data.caseId });
+      
+      return result;
+    } catch (error) {
+      console.error('Comprehensive analysis error:', error);
+      Sentry.captureException(error, {
+        tags: { service: 'ai', operation: 'executeComprehensiveAnalysis' },
+        extra: { caseId: data.caseId }
+      });
+      
+      return {
+        summary: 'Comprehensive analysis temporarily unavailable',
+        recommendations: [],
+        nextSteps: [],
+        error: error.message
+      };
+    }
+  }
+
   // Helper method to extract parties from text
   extractParties(text, partyType) {
     // Simple extraction - in production, use more sophisticated NLP

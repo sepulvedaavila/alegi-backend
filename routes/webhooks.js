@@ -1,7 +1,7 @@
 // routes/webhooks.js
 const express = require('express');
 const router = express.Router();
-const LinearPipelineService = require('../services/linear-pipeline.service');
+const EnhancedLinearPipelineService = require('../services/enhanced-linear-pipeline.service');
 const Sentry = require('@sentry/node');
 const { verifySupabaseWebhook, verifyExternalWebhook } = require('../middleware/webhook-auth');
 const { createClient } = require('@supabase/supabase-js');
@@ -11,8 +11,8 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
-// Initialize linear pipeline service
-const linearPipeline = new LinearPipelineService();
+// Initialize enhanced linear pipeline service
+const enhancedPipeline = new EnhancedLinearPipelineService();
 
 // External webhook endpoint for case_briefs table
 router.post('/external/case-briefs', verifyExternalWebhook, async (req, res) => {
@@ -28,23 +28,14 @@ router.post('/external/case-briefs', verifyExternalWebhook, async (req, res) => 
     
     // Only process INSERT and UPDATE operations
     if (type === 'INSERT' || type === 'UPDATE') {
-      // Update status to processing immediately
-      await supabase
-        .from('case_briefs')
-        .update({ 
-          processing_status: 'processing',
-          last_ai_update: new Date().toISOString()
-        })
-        .eq('id', record.id);
-      
-      // Execute linear pipeline asynchronously
+      // Execute enhanced pipeline asynchronously
       setImmediate(async () => {
         try {
-          console.log(`Starting linear pipeline for case ${record.id}`);
-          await linearPipeline.executeLinearPipeline(record.id);
-          console.log(`Linear pipeline completed for case ${record.id}`);
+          console.log(`Starting Enhanced ALEGI Pipeline for case ${record.id}`);
+          const features = await enhancedPipeline.executeEnhancedPipeline(record.id);
+          console.log(`Enhanced ALEGI Pipeline completed for case ${record.id} with ${Object.keys(features).length} features`);
         } catch (error) {
-          console.error(`Linear pipeline failed for case ${record.id}:`, error);
+          console.error(`Enhanced ALEGI Pipeline failed for case ${record.id}:`, error);
           
           // Update case status to failed
           await supabase
@@ -56,19 +47,20 @@ router.post('/external/case-briefs', verifyExternalWebhook, async (req, res) => 
             .eq('id', record.id);
             
           Sentry.captureException(error, {
-            tags: { caseId: record.id, webhook: 'external' }
+            tags: { caseId: record.id, webhook: 'external', pipeline: 'enhanced' }
           });
         }
       });
       
-      console.log(`Linear pipeline triggered for case ${record.id}`);
+      console.log(`Enhanced ALEGI Pipeline triggered for case ${record.id}`);
     }
     
     res.json({ 
       success: true, 
-      message: `Case ${type.toLowerCase()} processing initiated`,
+      message: `Case ${type.toLowerCase()} processing initiated with Enhanced ALEGI Pipeline`,
       caseId: record.id,
-      webhookType: type
+      webhookType: type,
+      pipeline: 'enhanced'
     });
   } catch (error) {
     console.error('External webhook error:', error);
@@ -86,23 +78,14 @@ router.post('/supabase/case-created', verifySupabaseWebhook, async (req, res) =>
       userId: record.user_id
     });
     
-    // Update status to processing immediately
-    await supabase
-      .from('case_briefs')
-      .update({ 
-        processing_status: 'processing',
-        last_ai_update: new Date().toISOString()
-      })
-      .eq('id', record.id);
-    
-    // Execute linear pipeline asynchronously
+    // Execute enhanced pipeline asynchronously
     setImmediate(async () => {
       try {
-        console.log(`Starting linear pipeline for case ${record.id}`);
-        await linearPipeline.executeLinearPipeline(record.id);
-        console.log(`Linear pipeline completed for case ${record.id}`);
+        console.log(`Starting Enhanced ALEGI Pipeline for case ${record.id}`);
+        const features = await enhancedPipeline.executeEnhancedPipeline(record.id);
+        console.log(`Enhanced ALEGI Pipeline completed for case ${record.id} with ${Object.keys(features).length} features`);
       } catch (error) {
-        console.error(`Linear pipeline failed for case ${record.id}:`, error);
+        console.error(`Enhanced ALEGI Pipeline failed for case ${record.id}:`, error);
         
         // Update case status to failed
         await supabase
@@ -114,12 +97,16 @@ router.post('/supabase/case-created', verifySupabaseWebhook, async (req, res) =>
           .eq('id', record.id);
           
         Sentry.captureException(error, {
-          tags: { caseId: record.id, webhook: 'supabase' }
+          tags: { caseId: record.id, webhook: 'supabase', pipeline: 'enhanced' }
         });
       }
     });
     
-    res.json({ success: true, message: 'Case processing initiated' });
+    res.json({ 
+      success: true, 
+      message: 'Enhanced ALEGI Pipeline processing initiated',
+      pipeline: 'enhanced'
+    });
   } catch (error) {
     console.error('Supabase webhook error:', error);
     res.status(500).json({ error: 'Processing failed' });
@@ -137,26 +124,16 @@ router.post('/supabase/document-uploaded', verifySupabaseWebhook, async (req, re
       fileName: record.file_name
     });
     
-    // When a new document is uploaded, re-run the linear pipeline for the case
-    // This ensures all analysis includes the new document
+    // When a new document is uploaded, re-run the enhanced pipeline for the case
     if (record.case_id) {
-      // Update case status to indicate re-processing
-      await supabase
-        .from('case_briefs')
-        .update({ 
-          processing_status: 'processing',
-          last_ai_update: new Date().toISOString()
-        })
-        .eq('id', record.case_id);
-      
-      // Execute linear pipeline asynchronously
+      // Execute enhanced pipeline asynchronously
       setImmediate(async () => {
         try {
-          console.log(`Re-running linear pipeline for case ${record.case_id} after document upload`);
-          await linearPipeline.executeLinearPipeline(record.case_id);
-          console.log(`Linear pipeline completed for case ${record.case_id}`);
+          console.log(`Re-running Enhanced ALEGI Pipeline for case ${record.case_id} after document upload`);
+          const features = await enhancedPipeline.executeEnhancedPipeline(record.case_id);
+          console.log(`Enhanced ALEGI Pipeline completed for case ${record.case_id} with ${Object.keys(features).length} features`);
         } catch (error) {
-          console.error(`Linear pipeline failed for case ${record.case_id}:`, error);
+          console.error(`Enhanced ALEGI Pipeline failed for case ${record.case_id}:`, error);
           
           // Update case status to failed
           await supabase
@@ -168,7 +145,7 @@ router.post('/supabase/document-uploaded', verifySupabaseWebhook, async (req, re
             .eq('id', record.case_id);
             
           Sentry.captureException(error, {
-            tags: { caseId: record.case_id, webhook: 'document-upload' }
+            tags: { caseId: record.case_id, webhook: 'document-upload', pipeline: 'enhanced' }
           });
         }
       });
@@ -176,9 +153,10 @@ router.post('/supabase/document-uploaded', verifySupabaseWebhook, async (req, re
     
     res.json({ 
       success: true, 
-      message: 'Document uploaded, case re-processing initiated',
+      message: 'Document uploaded, Enhanced ALEGI Pipeline re-processing initiated',
       documentId: record.id,
-      caseId: record.case_id
+      caseId: record.case_id,
+      pipeline: 'enhanced'
     });
   } catch (error) {
     console.error('Document webhook error:', error);
@@ -245,23 +223,14 @@ async function handleNewCaseBrief(caseBrief, res) {
   try {
     console.log('Processing new case brief:', caseBrief.id);
     
-    // Update status to processing
-    await supabase
-      .from('case_briefs')
-      .update({ 
-        processing_status: 'processing',
-        last_ai_update: new Date().toISOString()
-      })
-      .eq('id', caseBrief.id);
-
-    // Execute linear pipeline asynchronously
+    // Execute enhanced pipeline asynchronously
     setImmediate(async () => {
       try {
-        console.log(`Starting linear pipeline for case ${caseBrief.id}`);
-        await linearPipeline.executeLinearPipeline(caseBrief.id);
-        console.log(`Linear pipeline completed for case ${caseBrief.id}`);
+        console.log(`Starting Enhanced ALEGI Pipeline for case ${caseBrief.id}`);
+        const features = await enhancedPipeline.executeEnhancedPipeline(caseBrief.id);
+        console.log(`Enhanced ALEGI Pipeline completed for case ${caseBrief.id} with ${Object.keys(features).length} features`);
       } catch (error) {
-        console.error(`Linear pipeline failed for case ${caseBrief.id}:`, error);
+        console.error(`Enhanced ALEGI Pipeline failed for case ${caseBrief.id}:`, error);
         
         // Log detailed error
         await supabase.from('processing_errors').insert({
@@ -281,16 +250,17 @@ async function handleNewCaseBrief(caseBrief, res) {
           .eq('id', caseBrief.id);
           
         Sentry.captureException(error, {
-          tags: { caseId: caseBrief.id, webhook: 'universal' }
+          tags: { caseId: caseBrief.id, webhook: 'universal', pipeline: 'enhanced' }
         });
       }
     });
 
-    console.log(`Linear pipeline triggered for case ${caseBrief.id}`);
+    console.log(`Enhanced ALEGI Pipeline triggered for case ${caseBrief.id}`);
     return res.status(200).json({ 
       success: true, 
       caseId: caseBrief.id,
-      message: 'Case processing initiated successfully'
+      message: 'Enhanced ALEGI Pipeline processing initiated successfully',
+      pipeline: 'enhanced'
     });
 
   } catch (error) {
@@ -306,25 +276,16 @@ async function handleNewDocument(document, res) {
   try {
     console.log('New document uploaded:', document.id);
     
-    // When a new document is uploaded, re-run the linear pipeline for the case
+    // When a new document is uploaded, re-run the enhanced pipeline for the case
     if (document.case_id) {
-      // Update case status to indicate re-processing
-      await supabase
-        .from('case_briefs')
-        .update({ 
-          processing_status: 'processing',
-          last_ai_update: new Date().toISOString()
-        })
-        .eq('id', document.case_id);
-      
-      // Execute linear pipeline asynchronously
+      // Execute enhanced pipeline asynchronously
       setImmediate(async () => {
         try {
-          console.log(`Re-running linear pipeline for case ${document.case_id} after document upload`);
-          await linearPipeline.executeLinearPipeline(document.case_id);
-          console.log(`Linear pipeline completed for case ${document.case_id}`);
+          console.log(`Re-running Enhanced ALEGI Pipeline for case ${document.case_id} after document upload`);
+          const features = await enhancedPipeline.executeEnhancedPipeline(document.case_id);
+          console.log(`Enhanced ALEGI Pipeline completed for case ${document.case_id} with ${Object.keys(features).length} features`);
         } catch (error) {
-          console.error(`Linear pipeline failed for case ${document.case_id}:`, error);
+          console.error(`Enhanced ALEGI Pipeline failed for case ${document.case_id}:`, error);
           
           // Update case status to failed
           await supabase
@@ -336,16 +297,17 @@ async function handleNewDocument(document, res) {
             .eq('id', document.case_id);
             
           Sentry.captureException(error, {
-            tags: { caseId: document.case_id, webhook: 'document-universal' }
+            tags: { caseId: document.case_id, webhook: 'document-universal', pipeline: 'enhanced' }
           });
         }
       });
       
       return res.status(200).json({ 
         success: true, 
-        message: 'Document uploaded, case re-processing initiated',
+        message: 'Document uploaded, Enhanced ALEGI Pipeline re-processing initiated',
         documentId: document.id,
-        caseId: document.case_id
+        caseId: document.case_id,
+        pipeline: 'enhanced'
       });
     } else {
       return res.status(400).json({ 
