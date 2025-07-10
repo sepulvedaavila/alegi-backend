@@ -125,6 +125,25 @@ class EnhancedLinearPipelineService {
       if (document.file_path && !document.ai_extracted_text) {
         try {
           console.log(`Processing document: ${document.file_name}`);
+          console.log(`Document file path: ${document.file_path}`);
+          
+          // Validate file path before attempting extraction
+          const validation = this.pdfService.validateFilePath(document.file_path);
+          if (!validation.valid) {
+            console.error(`Invalid file path for document ${document.file_name}: ${validation.error}`);
+            
+            // Update document with error status
+            await this.supabase
+              .from('case_documents')
+              .update({ 
+                processing_status: 'failed',
+                error_message: `Invalid file path: ${validation.error}`,
+                processed_at: new Date().toISOString()
+              })
+              .eq('id', document.id);
+            
+            continue; // Skip to next document
+          }
           
           // Extract text from PDF
           const extractedText = await this.pdfService.extractText(document.file_path);
@@ -134,6 +153,7 @@ class EnhancedLinearPipelineService {
             .from('case_documents')
             .update({ 
               ai_extracted_text: extractedText.text,
+              processing_status: 'completed',
               processed_at: new Date().toISOString()
             })
             .eq('id', document.id);
@@ -148,12 +168,37 @@ class EnhancedLinearPipelineService {
             confidence: extractedText.confidence
           });
           
+          console.log(`✅ Successfully processed document: ${document.file_name}`);
+          
         } catch (error) {
           console.error(`Failed to process document ${document.file_name}:`, error);
+          console.error(`Error details:`, {
+            message: error.message,
+            stack: error.stack,
+            filePath: document.file_path
+          });
+          
+          // Update document with error status
+          try {
+            await this.supabase
+              .from('case_documents')
+              .update({ 
+                processing_status: 'failed',
+                error_message: error.message,
+                processed_at: new Date().toISOString()
+              })
+              .eq('id', document.id);
+          } catch (updateError) {
+            console.error(`Failed to update document error status for ${document.file_name}:`, updateError);
+          }
+          
           // Continue with other documents
         }
       } else if (document.ai_extracted_text) {
+        console.log(`Document ${document.file_name} already has extracted text, skipping extraction`);
         extractedContent += `\n\n--- ${document.file_name} ---\n${document.ai_extracted_text}`;
+      } else {
+        console.log(`Document ${document.file_name} has no file path, skipping`);
       }
     }
     

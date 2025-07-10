@@ -32,6 +32,17 @@ class PDFService {
       };
     } catch (error) {
       console.error('[PDFService] PDF extraction error:', error);
+      
+      // If the error is related to file download, try to provide a helpful message
+      if (error.message.includes('Supabase download error') || error.message.includes('Failed to download file')) {
+        console.error('[PDFService] File download failed. This could be due to:');
+        console.error('  - File not found in Supabase storage');
+        console.error('  - Incorrect file path');
+        console.error('  - Supabase environment variables not configured');
+        console.error('  - Storage bucket access issues');
+        console.error(`  - File path attempted: ${filePath}`);
+      }
+      
       throw error;
     }
   }
@@ -90,6 +101,21 @@ class PDFService {
 
   async downloadFromSupabase(filePath) {
     try {
+      // Validate file path first
+      const validation = this.validateFilePath(filePath);
+      if (!validation.valid) {
+        throw new Error(validation.error);
+      }
+
+      // Check environment variables
+      if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
+        throw new Error('Supabase environment variables not configured (SUPABASE_URL or SUPABASE_SERVICE_KEY missing)');
+      }
+
+      console.log(`[PDFService] Attempting to download file from Supabase: ${filePath}`);
+      console.log(`[PDFService] Supabase URL: ${process.env.SUPABASE_URL}`);
+      console.log(`[PDFService] Service key configured: ${!!process.env.SUPABASE_SERVICE_KEY}`);
+
       // Import Supabase client
       const { createClient } = require('@supabase/supabase-js');
       const supabase = createClient(
@@ -97,18 +123,76 @@ class PDFService {
         process.env.SUPABASE_SERVICE_KEY
       );
 
+      // First, check if the bucket exists and we have access
+      console.log(`[PDFService] Checking bucket access...`);
+      const { data: buckets, error: bucketError } = await supabase.storage.listBuckets();
+      
+      if (bucketError) {
+        console.error('[PDFService] Bucket access error:', bucketError);
+        throw new Error(`Bucket access failed: ${bucketError.message}`);
+      }
+
+      const availableBuckets = buckets.map(b => b.name);
+      console.log(`[PDFService] Available buckets: ${availableBuckets.join(', ')}`);
+
+      if (!availableBuckets.includes('case-files')) {
+        throw new Error(`case-files bucket not found. Available buckets: ${availableBuckets.join(', ')}`);
+      }
+
+      // Check if file exists before attempting download
+      console.log(`[PDFService] Checking if file exists: ${filePath}`);
+      const { data: fileList, error: listError } = await supabase.storage
+        .from('case-files')
+        .list(filePath.split('/').slice(0, -1).join('/'));
+
+      if (listError) {
+        console.error('[PDFService] File list error:', listError);
+        // Continue anyway, the file might exist
+      } else {
+        const fileName = filePath.split('/').pop();
+        const fileExists = fileList.some(file => file.name === fileName);
+        console.log(`[PDFService] File exists check: ${fileExists ? 'Found' : 'Not found'}`);
+      }
+
       // Download file from Supabase storage
       const { data, error } = await supabase.storage
         .from('case-files')
         .download(filePath);
 
       if (error) {
-        throw new Error(`Supabase download error: ${error.message}`);
+        console.error('[PDFService] Supabase download error details:', {
+          error: error,
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code
+        });
+        
+        // Provide more specific error messages based on error code
+        let errorMessage = error.message || 'Unknown error';
+        if (error.code === '404') {
+          errorMessage = `File not found: ${filePath}`;
+        } else if (error.code === '401') {
+          errorMessage = 'Unauthorized access to Supabase storage';
+        } else if (error.code === '403') {
+          errorMessage = 'Forbidden access to Supabase storage';
+        }
+        
+        throw new Error(`Supabase download error: ${errorMessage} (Code: ${error.code || 'N/A'})`);
       }
 
+      if (!data) {
+        throw new Error(`No data returned from Supabase for file path: ${filePath}`);
+      }
+
+      console.log(`[PDFService] Successfully downloaded file from Supabase: ${filePath}`);
       return data;
     } catch (error) {
-      console.error('[PDFService] Supabase download error:', error);
+      console.error('[PDFService] Supabase download error:', {
+        message: error.message,
+        stack: error.stack,
+        filePath: filePath
+      });
       throw new Error(`Failed to download file from Supabase: ${error.message}`);
     }
   }
@@ -146,6 +230,101 @@ class PDFService {
         error: `API connection failed: ${error.message}` 
       };
     }
+  }
+
+  // Test method to verify Supabase file download
+  async testSupabaseDownload(filePath) {
+    try {
+      console.log(`[PDFService] Testing Supabase download for: ${filePath}`);
+      
+      // Check environment variables
+      if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
+        return { 
+          success: false, 
+          error: 'Supabase environment variables not configured' 
+        };
+      }
+
+      // Import Supabase client
+      const { createClient } = require('@supabase/supabase-js');
+      const supabase = createClient(
+        process.env.SUPABASE_URL,
+        process.env.SUPABASE_SERVICE_KEY
+      );
+
+      // Test bucket access first
+      const { data: buckets, error: bucketError } = await supabase.storage.listBuckets();
+      
+      if (bucketError) {
+        return { 
+          success: false, 
+          error: `Bucket access failed: ${bucketError.message}` 
+        };
+      }
+
+      const availableBuckets = buckets.map(b => b.name);
+      console.log(`[PDFService] Available buckets: ${availableBuckets.join(', ')}`);
+
+      // Test file download
+      const { data, error } = await supabase.storage
+        .from('case-files')
+        .download(filePath);
+
+      if (error) {
+        return { 
+          success: false, 
+          error: `Download failed: ${error.message}`,
+          details: {
+            code: error.code,
+            details: error.details,
+            hint: error.hint
+          }
+        };
+      }
+
+      if (!data) {
+        return { 
+          success: false, 
+          error: 'No data returned from download' 
+        };
+      }
+
+      return { 
+        success: true, 
+        message: 'Supabase download test successful',
+        fileSize: data.size || 'unknown'
+      };
+    } catch (error) {
+      return { 
+        success: false, 
+        error: `Test failed: ${error.message}` 
+      };
+    }
+  }
+
+  // Validate file path format
+  validateFilePath(filePath) {
+    if (!filePath) {
+      return { valid: false, error: 'File path is required' };
+    }
+
+    // Check if path follows expected format: documents/{caseId}/{fileName}
+    const pathParts = filePath.split('/');
+    if (pathParts.length < 3) {
+      return { 
+        valid: false, 
+        error: `Invalid file path format. Expected: documents/{caseId}/{fileName}, got: ${filePath}` 
+      };
+    }
+
+    if (pathParts[0] !== 'documents') {
+      return { 
+        valid: false, 
+        error: `File path should start with 'documents/', got: ${filePath}` 
+      };
+    }
+
+    return { valid: true, pathParts };
   }
 
   // Alternative method using direct file upload and text extraction
