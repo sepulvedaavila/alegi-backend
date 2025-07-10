@@ -140,14 +140,14 @@ class AIService {
     await new Promise(resolve => setTimeout(resolve, delayBetweenCalls));
     
     // Add timeout to prevent hanging requests
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    const timeoutId = setTimeout(() => {
+      console.log('OpenAI API call timeout - aborting request');
+    }, 30000);
     
     try {
       const response = await this.openai.chat.completions.create({
         model,
         messages,
-        signal: controller.signal,
         ...options
       });
       
@@ -176,10 +176,6 @@ class AIService {
       
       if (error.status >= 500) {
         throw new Error(`OpenAI server error: ${error.message}`);
-      }
-      
-      if (error.name === 'AbortError') {
-        throw new Error('OpenAI API timeout');
       }
       
       throw error;
