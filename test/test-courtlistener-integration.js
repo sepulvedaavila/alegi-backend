@@ -1,3 +1,6 @@
+// Load environment variables
+require('dotenv').config();
+
 const courtListenerService = require('../services/courtlistener.service');
 // Circuit breaker service removed - using direct calls
 

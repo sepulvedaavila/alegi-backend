@@ -5,16 +5,16 @@ const { mapToCourtListenerCourt } = require('../utils/courtMaps');
 class CourtListenerService {
   constructor() {
     this.baseURL = 'https://www.courtlistener.com/api/rest/v4/';
-    this.apiKey = process.env.COURTLISTENER_API_KEY;
     this.requestTimeout = 60000; // Increased from 30000 to 60000ms (60 seconds)
     this.rateLimiter = {
       lastCall: 0,
       minInterval: 1000 // 1 second between calls
     };
-    
-    if (!this.apiKey) {
-      console.warn('CourtListener API key not found - some features will use mock data');
-    }
+  }
+
+  // Get API key dynamically to ensure environment variables are loaded
+  get apiKey() {
+    return process.env.COURTLISTENER_API_KEY;
   }
 
   async makeAPICall(endpoint, params = {}, retryCount = 0) {
@@ -45,6 +45,8 @@ class CourtListenerService {
 
     if (this.apiKey) {
       headers['Authorization'] = `Token ${this.apiKey}`;
+    } else {
+      console.warn('CourtListener API key not found - making unauthenticated request');
     }
 
     const controller = new AbortController();
