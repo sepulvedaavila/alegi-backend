@@ -4,17 +4,23 @@ const { mapToCourtListenerCourt } = require('../utils/courtMaps');
 
 class CourtListenerService {
   constructor() {
+    this.baseURL = 'https://www.courtlistener.com/api/rest/v4/';
     this.apiKey = process.env.COURTLISTENER_API_KEY;
-    this.baseURL = process.env.COURTLISTENER_BASE_URL || 'https://www.courtlistener.com/api/rest/v4/';
+    this.requestTimeout = 60000; // Increased from 30000 to 60000ms (60 seconds)
     this.rateLimiter = {
       lastCall: 0,
       minInterval: 1000 // 1 second between calls
     };
-    // Increased timeout for better reliability
-    this.requestTimeout = parseInt(process.env.COURTLISTENER_TIMEOUT) || 30000; // 30 seconds
+    
+    if (!this.apiKey) {
+      console.warn('CourtListener API key not found - some features will use mock data');
+    }
   }
 
-  async makeAPICall(endpoint, params = {}) {
+  async makeAPICall(endpoint, params = {}, retryCount = 0) {
+    const maxRetries = 3;
+    const baseDelay = 2000; // 2 seconds base delay
+    
     // Rate limiting
     const now = Date.now();
     const timeSinceLastCall = now - this.rateLimiter.lastCall;
@@ -59,6 +65,14 @@ class CourtListenerService {
       return await response.json();
     } catch (error) {
       clearTimeout(timeoutId);
+      
+      // If it's a timeout or network error and we have retries left, retry with exponential backoff
+      if ((error.name === 'AbortError' || error.message.includes('timeout') || error.message.includes('network')) && retryCount < maxRetries) {
+        const delay = baseDelay * Math.pow(2, retryCount); // Exponential backoff
+        console.warn(`CourtListener API call failed (attempt ${retryCount + 1}/${maxRetries + 1}), retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return this.makeAPICall(endpoint, params, retryCount + 1);
+      }
       
       if (error.name === 'AbortError') {
         throw new Error(`CourtListener API timeout after ${this.requestTimeout}ms`);

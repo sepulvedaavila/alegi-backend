@@ -502,4 +502,4 @@ const AI_PROMPTS = {
   }
 };
 
-module.exports = AI_PROMPTS; 
+module.exports = { AI_PROMPTS }; 
