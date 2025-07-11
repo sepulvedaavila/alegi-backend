@@ -16,12 +16,8 @@ class PDFService {
 
       console.log(`[PDFService] Extracting text from: ${filePath}`);
 
-      // Step 1: Upload the file to PDF.co
-      const uploadResponse = await this.uploadFile(filePath);
-      console.log(`[PDFService] File uploaded, URL: ${uploadResponse.url}`);
-
-      // Step 2: Extract text from the uploaded file
-      const extractResponse = await this.extractTextFromURL(uploadResponse.url);
+      // Use the direct PDF.co API approach - no need to upload first
+      const extractResponse = await this.extractTextFromURL(filePath);
       console.log(`[PDFService] Text extraction completed, pages: ${extractResponse.pages}`);
 
       return {
@@ -82,8 +78,8 @@ class PDFService {
 
   async extractTextFromURL(fileUrl) {
     try {
-      // PDF.co text extraction endpoint - using the correct endpoint
-      const response = await axios.post(`${this.baseURL}/extract-text`, {
+      // PDF.co text extraction endpoint - using the correct endpoint according to docs
+      const response = await axios.post(`${this.baseURL}/pdf-to-text`, {
         url: fileUrl
       }, {
         headers: {

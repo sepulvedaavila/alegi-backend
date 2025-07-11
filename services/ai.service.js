@@ -151,10 +151,13 @@ class AIService {
     }, timeout);
     
     try {
+      // Remove operation from options as it's not a valid OpenAI API parameter
+      const { operation, ...openAIOptions } = options;
+      
       const response = await this.openai.chat.completions.create({
         model,
         messages,
-        ...options
+        ...openAIOptions
       });
       
       clearTimeout(timeoutId);
