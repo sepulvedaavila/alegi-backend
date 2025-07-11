@@ -79,7 +79,7 @@ class PDFService {
   async extractTextFromURL(fileUrl) {
     try {
       // PDF.co text extraction endpoint - using the correct endpoint according to docs
-      const response = await axios.post(`${this.baseURL}/pdf-to-text`, {
+      const response = await axios.post(`${this.baseURL}/pdf/convert/to/text`, {
         url: fileUrl
       }, {
         headers: {
