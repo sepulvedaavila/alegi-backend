@@ -153,10 +153,6 @@
       "destination": "/api/cases/[id]/enhanced-data.js"
     },
     {
-      "source": "/api/cases/process",
-      "destination": "/api/cases/process.js"
-    },
-    {
       "source": "/api/analytics/case-coverage",
       "destination": "/api/analytics/case-coverage.js"
     },

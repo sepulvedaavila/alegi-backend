@@ -2,48 +2,49 @@
 
 // Export all services from a single entry point
 module.exports = {
-    // Service initializer for centralized service management
-    serviceInitializer: require('./service-initializer'),
-    
-    // Core services
-    supabaseService: require('./supabase.service'),
-    errorTrackingService: require('./error-tracking.service'),
-    processingService: require('./processing.service'),
-    aiService: require('./ai.service'),
-    pdfService: require('./pdf.service'),
-    emailService: require('./email.service'),
-    externalService: require('./external.service'),
-    internalAuthService: require('./internal-auth.service'),
-    aiPrompts: require('./ai-prompts.service'),
-    
-    // Real-time and notification services
-    realtimeService: require('./realtime.service'),
-    notificationService: require('./notification.service'),
-    
-    // New MVP feature services
-    rateLimiter: require('./rateLimiter'),
-    queueService: require('./queueService'),
-    costMonitor: require('./costMonitor.service'),
-    courtlistenerService: require('./courtlistener.service'),
-    
-    // Linear pipeline service (new refactor)
-    linearPipelineService: require('./linear-pipeline.service'),
-    
-    // Re-export individual services for backwards compatibility
-    SupabaseService: require('./supabase.service'),
-    ErrorTrackingService: require('./error-tracking.service'),
-    ProcessingService: require('./processing.service'),
-    AIService: require('./ai.service'),
-    PDFService: require('./pdf.service'),
-    EmailService: require('./email.service'),
-    ExternalService: require('./external.service'),
-    InternalAuthService: require('./internal-auth.service'),
-    AIPrompts: require('./ai-prompts.service'),
-    RealtimeService: require('./realtime.service'),
-    NotificationService: require('./notification.service'),
-    RateLimiter: require('./rateLimiter'),
-    QueueService: require('./queueService'),
-    CostMonitor: require('./costMonitor.service'),
-    CourtListenerService: require('./courtlistener.service'),
-    LinearPipelineService: require('./linear-pipeline.service')
-  };
+  // Core services
+  aiService: require('./ai.service'),
+  pdfService: require('./pdf.service'),
+  courtListenerService: require('./courtlistener.service'),
+  emailService: require('./email.service'),
+  notificationService: require('./notification.service'),
+  realtimeService: require('./realtime.service'),
+  costMonitor: require('./costMonitor.service'),
+  errorTrackingService: require('./error-tracking.service'),
+  rateLimiter: require('./rateLimiter'),
+  queueService: require('./queueService'),
+  
+  // Processing services
+  processingService: require('./processing.service'),
+  enhancedLinearPipelineService: require('./enhanced-linear-pipeline.service'),
+  
+  // External services
+  externalService: require('./external.service'),
+  internalAPIService: require('./internal-api.service'),
+  internalAuthService: require('./internal-auth.service'),
+  
+  // Utility services
+  serviceInitializer: require('./service-initializer'),
+  
+  // Legacy services (deprecated)
+  // linearPipelineService: require('./linear-pipeline.service'), // REMOVED - Use enhanced pipeline instead
+  
+  // Individual service exports for direct access
+  AIService: require('./ai.service'),
+  PDFService: require('./pdf.service'),
+  CourtListenerService: require('./courtlistener.service'),
+  EmailService: require('./email.service'),
+  NotificationService: require('./notification.service'),
+  RealtimeService: require('./realtime.service'),
+  CostMonitor: require('./costMonitor.service'),
+  ErrorTrackingService: require('./error-tracking.service'),
+  RateLimiter: require('./rateLimiter'),
+  QueueService: require('./queueService'),
+  ProcessingService: require('./processing.service'),
+  EnhancedLinearPipelineService: require('./enhanced-linear-pipeline.service'),
+  ExternalService: require('./external.service'),
+  InternalAPIService: require('./internal-api.service'),
+  InternalAuthService: require('./internal-auth.service'),
+  ServiceInitializer: require('./service-initializer')
+  // LinearPipelineService: require('./linear-pipeline.service') // REMOVED - Use enhanced pipeline instead
+};

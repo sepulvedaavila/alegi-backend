@@ -364,7 +364,7 @@ module.exports = async (req, res) => {
     }
     
     // Case not processed yet - trigger processing
-    console.log(`Case ${caseId} not processed yet, triggering linear pipeline`);
+    console.log(`Case ${caseId} not processed yet, triggering enhanced pipeline`);
     
     // Update status to processing
     await supabase
@@ -375,16 +375,16 @@ module.exports = async (req, res) => {
       })
       .eq('id', caseId);
     
-    // Import and execute linear pipeline
-    const LinearPipelineService = require('../../../services/linear-pipeline.service');
-    const linearPipeline = new LinearPipelineService();
+    // Import and execute enhanced pipeline
+    const EnhancedLinearPipelineService = require('../../../services/enhanced-linear-pipeline.service');
+    const enhancedPipeline = new EnhancedLinearPipelineService();
     
-    // Execute linear pipeline asynchronously
+    // Execute enhanced pipeline asynchronously
     setImmediate(async () => {
       try {
-        await linearPipeline.executeLinearPipeline(caseId);
+        await enhancedPipeline.executeEnhancedPipeline(caseId);
       } catch (error) {
-        console.error(`Linear pipeline failed for case ${caseId}:`, error);
+        console.error(`Enhanced pipeline failed for case ${caseId}:`, error);
         await supabase
           .from('case_briefs')
           .update({ 

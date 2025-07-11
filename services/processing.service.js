@@ -138,17 +138,17 @@ class ProcessingService {
         })
         .eq('id', caseId);
 
-      // Import and execute linear pipeline asynchronously
-      const LinearPipelineService = require('./linear-pipeline.service');
-      const linearPipeline = new LinearPipelineService();
+      // Import and execute enhanced pipeline asynchronously
+      const EnhancedLinearPipelineService = require('./enhanced-linear-pipeline.service');
+      const enhancedPipeline = new EnhancedLinearPipelineService();
       
       setImmediate(async () => {
         try {
-          console.log(`Starting linear pipeline for case ${caseId}`);
-          await linearPipeline.executeLinearPipeline(caseId);
-          console.log(`Linear pipeline completed for case ${caseId}`);
+          console.log(`Starting enhanced pipeline for case ${caseId}`);
+          await enhancedPipeline.executeEnhancedPipeline(caseId);
+          console.log(`Enhanced pipeline completed for case ${caseId}`);
         } catch (error) {
-          console.error(`Linear pipeline failed for case ${caseId}:`, error);
+          console.error(`Enhanced pipeline failed for case ${caseId}:`, error);
           await this.supabase
             .from('case_briefs')
             .update({ 

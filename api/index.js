@@ -405,7 +405,10 @@ app.get('/api/cases/:caseId/view', authenticateJWT, async (req, res) => {
       documentsResult,
       enrichmentResult,
       predictionsResult,
-      analysisResult
+      analysisResult,
+      fusedDataResult,
+      documentExtractionsResult,
+      precedentCasesResult
     ] = await Promise.allSettled([
       // Basic case data
       supabase.from('case_briefs').select('*').eq('id', caseId).single(),
@@ -420,7 +423,11 @@ app.get('/api/cases/:caseId/view', authenticateJWT, async (req, res) => {
       // AI results (if available)
       supabase.from('case_ai_enrichment').select('*').eq('case_id', caseId).single(),
       supabase.from('case_predictions').select('*').eq('case_id', caseId).single(),
-      supabase.from('case_analysis').select('*').eq('case_id', caseId)
+      supabase.from('case_analysis').select('*').eq('case_id', caseId),
+      // Enhanced data
+      supabase.from('case_data_fusion').select('*').eq('case_id', caseId).single(),
+      supabase.from('case_document_extractions').select('*').eq('case_id', caseId).order('created_at', { ascending: true }),
+      supabase.from('precedent_cases').select('*').eq('case_id', caseId).order('similarity_score', { ascending: false }).limit(10)
     ]);
     
     // Check if case exists
@@ -430,11 +437,22 @@ app.get('/api/cases/:caseId/view', authenticateJWT, async (req, res) => {
     
     const caseData = caseResult.value.data;
     
+    // Extract enhanced data
+    const fusedData = fusedDataResult.status === 'fulfilled' ? fusedDataResult.value.data : null;
+    const documentExtractions = documentExtractionsResult.status === 'fulfilled' ? documentExtractionsResult.value.data || [] : [];
+    const precedentCases = precedentCasesResult.status === 'fulfilled' ? precedentCasesResult.value.data || [] : [];
+    
     // Organize analysis results by type
     const analysisMap = {};
     if (analysisResult.status === 'fulfilled' && analysisResult.value.data) {
       analysisResult.value.data.forEach(result => {
-        analysisMap[result.analysis_type] = result.result;
+        analysisMap[result.analysis_type] = {
+          result: result.result,
+          confidenceScore: result.confidence_score,
+          factors: result.factors,
+          createdAt: result.created_at,
+          updatedAt: result.updated_at
+        };
       });
     }
     
@@ -453,6 +471,54 @@ app.get('/api/cases/:caseId/view', authenticateJWT, async (req, res) => {
       evidence: evidenceResult.status === 'fulfilled' ? evidenceResult.value.data || [] : [],
       documents: documentsResult.status === 'fulfilled' ? documentsResult.value.data || [] : [],
       
+      // Enhanced data
+      enhancedData: {
+        fusedData: fusedData ? {
+          status: fusedData.fusion_status,
+          confidence: fusedData.fused_result?.confidence_score,
+          parties: fusedData.fused_result?.parties,
+          legalClaims: fusedData.fused_result?.legal_claims,
+          damagesSought: fusedData.fused_result?.damages_sought,
+          keyDates: fusedData.fused_result?.key_dates,
+          conflicts: fusedData.fused_result?.conflicts,
+          additionalInsights: fusedData.fused_result?.additional_insights,
+          fusionTimestamp: fusedData.fusion_metadata?.fusion_timestamp
+        } : null,
+        documentAnalysis: {
+          totalDocuments: documentExtractions?.length || 0,
+          documents: documentExtractions?.map(doc => ({
+            fileName: doc.file_name,
+            documentType: doc.structured_data?.document_type,
+            parties: doc.structured_data?.parties,
+            legalClaims: doc.structured_data?.legal_claims,
+            damagesSought: doc.structured_data?.damages_sought,
+            keyDates: doc.structured_data?.key_dates,
+            jurisdiction: doc.structured_data?.jurisdiction,
+            caseNumber: doc.structured_data?.case_number,
+            processingStatus: doc.processing_status,
+            extractionTimestamp: doc.extraction_metadata?.extraction_timestamp,
+            confidence: doc.extraction_metadata?.confidence
+          })) || []
+        },
+        precedentAnalysis: {
+          totalPrecedents: precedentCases?.length || 0,
+          precedents: precedentCases?.map(precedent => ({
+            caseName: precedent.case_name,
+            citation: precedent.citation,
+            court: precedent.court,
+            jurisdiction: precedent.jurisdiction,
+            judgeName: precedent.judge_name,
+            legalIssues: precedent.legal_issues,
+            applicableStatutes: precedent.applicable_statutes,
+            strategyUsed: precedent.strategy_used,
+            outcome: precedent.outcome,
+            decisionSummary: precedent.decision_summary,
+            similarityScore: precedent.similarity_score,
+            fullTextUrl: precedent.full_text_url
+          })) || []
+        }
+      },
+      
       // AI analysis (if available)
       aiData: {
         enrichment: enrichmentResult.status === 'fulfilled' ? enrichmentResult.value.data : null,
@@ -469,7 +535,22 @@ app.get('/api/cases/:caseId/view', authenticateJWT, async (req, res) => {
           (enrichmentResult.status === 'fulfilled' && enrichmentResult.value.data) ||
           (predictionsResult.status === 'fulfilled' && predictionsResult.value.data) ||
           Object.keys(analysisMap).length > 0
-        )
+        ),
+        hasEnhancedData: !!(fusedData || documentExtractions.length > 0 || precedentCases.length > 0)
+      },
+      
+      // Data quality metrics
+      dataQuality: {
+        hasFusedData: !!fusedData,
+        hasDocumentExtractions: (documentExtractions?.length || 0) > 0,
+        hasPrecedentCases: (precedentCases?.length || 0) > 0,
+        hasAIEnrichment: !!(enrichmentResult.status === 'fulfilled' && enrichmentResult.value.data),
+        hasPredictions: !!(predictionsResult.status === 'fulfilled' && predictionsResult.value.data),
+        hasAnalysisResults: Object.keys(analysisMap).length > 0,
+        fusionConfidence: fusedData?.fused_result?.confidence_score || 0,
+        averageExtractionConfidence: documentExtractions?.length > 0 
+          ? documentExtractions.reduce((sum, doc) => sum + (doc.extraction_metadata?.confidence || 0), 0) / documentExtractions.length
+          : 0
       },
       
       // Metadata
