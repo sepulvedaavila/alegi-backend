@@ -148,29 +148,38 @@ class EnhancedLinearPipelineService {
           const filePathToUse = validation.relativePath || document.file_path;
           console.log(`Using file path for extraction: ${filePathToUse}`);
           
-          // Extract text from PDF
-          const extractedText = await this.pdfService.extractText(filePathToUse);
+          // Extract text from PDF (with timeout and optional failure)
+          const extractedText = await this.pdfService.extractText(filePathToUse, 15000);
           
-          // Update document with extracted text
+          // Update document status based on extraction success
+          const updateData = {
+            extraction_status: extractedText.success ? 'completed' : 'skipped'
+          };
+          
+          if (extractedText.success) {
+            updateData.ai_extracted_text = extractedText.text;
+            extractedContent += `\n\n--- ${document.file_name} ---\n${extractedText.text}`;
+            console.log(`✅ Successfully processed document: ${document.file_name}`);
+          } else {
+            updateData.error_message = extractedText.reason || 'PDF extraction failed';
+            console.log(`⚠️ Skipped document processing: ${document.file_name} - ${extractedText.reason}`);
+          }
+          
           await this.supabase
             .from('case_documents')
-            .update({ 
-              ai_extracted_text: extractedText.text,
-              extraction_status: 'completed'
-            })
+            .update(updateData)
             .eq('id', document.id);
-          
-          extractedContent += `\n\n--- ${document.file_name} ---\n${extractedText.text}`;
           
           documentAnalysis.push({
             documentId: document.id,
             fileName: document.file_name,
-            extractedText: extractedText.text,
-            pages: extractedText.pages,
-            confidence: extractedText.confidence
+            extractedText: extractedText.text || '',
+            pages: extractedText.pages || 0,
+            confidence: extractedText.confidence || 0,
+            success: extractedText.success,
+            skipped: extractedText.skipped || false,
+            reason: extractedText.reason || null
           });
-          
-          console.log(`✅ Successfully processed document: ${document.file_name}`);
           
         } catch (error) {
           console.error(`Failed to process document ${document.file_name}:`, error);
@@ -193,6 +202,18 @@ class EnhancedLinearPipelineService {
             console.error(`Failed to update document error status for ${document.file_name}:`, updateError);
           }
           
+          // Add failed document to analysis for completeness
+          documentAnalysis.push({
+            documentId: document.id,
+            fileName: document.file_name,
+            extractedText: '',
+            pages: 0,
+            confidence: 0,
+            success: false,
+            skipped: false,
+            reason: error.message
+          });
+          
           // Continue with other documents
         }
       } else if (document.ai_extracted_text) {
@@ -206,7 +227,17 @@ class EnhancedLinearPipelineService {
     context.data.extractedContent = extractedContent;
     context.data.documentAnalysis = documentAnalysis;
     
-    console.log(`✅ Document extraction completed for case ${caseId}`);
+    // Log summary of document processing
+    const successful = documentAnalysis.filter(d => d.success).length;
+    const skipped = documentAnalysis.filter(d => d.skipped).length;
+    const failed = documentAnalysis.filter(d => !d.success && !d.skipped).length;
+    
+    console.log(`✅ Document extraction completed for case ${caseId}: ${successful} successful, ${skipped} skipped, ${failed} failed`);
+    
+    // Continue pipeline even if no documents were successfully processed
+    if (successful === 0 && documentAnalysis.length > 0) {
+      console.log(`⚠️ No documents were successfully processed, but continuing with case analysis`);
+    }
   }
 
   // Step 2: Perform comprehensive case intake analysis

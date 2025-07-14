@@ -8,66 +8,99 @@ class PDFService {
     this.baseURL = 'https://api.pdf.co/v1';
   }
 
-  async extractText(filePath) {
+  async extractText(filePath, timeoutMs = 15000) {
     try {
       if (!this.apiKey) {
-        throw new Error('PDF API key not configured');
+        console.warn('[PDFService] PDF API key not configured, skipping extraction');
+        return {
+          success: false,
+          text: '',
+          pages: 0,
+          confidence: 0,
+          skipped: true,
+          reason: 'PDF API key not configured'
+        };
       }
 
-      console.log(`[PDFService] Extracting text from: ${filePath}`);
+      console.log(`[PDFService] Extracting text from: ${filePath} (timeout: ${timeoutMs}ms)`);
 
-      // Download file from Supabase first
-      const fileBlob = await this.downloadFromSupabase(filePath);
-      
-      // Convert Blob to Buffer for FormData compatibility
-      const arrayBuffer = await fileBlob.arrayBuffer();
-      const fileBuffer = Buffer.from(arrayBuffer);
-      
-      // Upload file to PDF.co to get a URL
-      const formData = new FormData();
-      formData.append('file', fileBuffer, {
-        filename: 'document.pdf',
-        contentType: 'application/pdf'
-      });
+      // Wrap the entire extraction process with a timeout
+      return await Promise.race([
+        this.performExtraction(filePath),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('PDF extraction timeout')), timeoutMs)
+        )
+      ]);
 
-      const uploadResponse = await axios.post(`${this.baseURL}/file/upload`, formData, {
-        headers: {
-          'x-api-key': this.apiKey,
-          ...formData.getHeaders()
-        }
-      });
-
-      if (uploadResponse.data.error) {
-        throw new Error(`PDF.co upload error: ${uploadResponse.data.error}`);
-      }
-
-      console.log(`[PDFService] File uploaded to PDF.co: ${uploadResponse.data.url}`);
-
-      // Now extract text using the uploaded file URL
-      const extractResponse = await this.extractTextFromURL(uploadResponse.data.url);
-      console.log(`[PDFService] Text extraction completed, pages: ${extractResponse.pages}`);
-
-      return {
-        success: true,
-        text: extractResponse.text,
-        pages: extractResponse.pages,
-        confidence: extractResponse.confidence || 0.95
-      };
     } catch (error) {
-      console.error('[PDFService] PDF extraction error:', error);
+      console.error('[PDFService] PDF extraction error:', error.message);
       
-      // If the error is related to file download, try to provide a helpful message
-      if (error.message.includes('Supabase download error') || error.message.includes('Failed to download file')) {
-        console.error('[PDFService] File download failed. This could be due to:');
-        console.error('  - File not found in Supabase storage');
-        console.error('  - Incorrect file path');
-        console.error('  - Supabase environment variables not configured');
-        console.error('  - Storage bucket access issues');
-        console.error(`  - File path attempted: ${filePath}`);
+      // Log the error but don't throw - make it optional
+      if (error.message.includes('timeout')) {
+        console.warn('[PDFService] PDF extraction timed out, continuing without document text');
+      } else if (error.message.includes('Supabase download error') || error.message.includes('Failed to download file')) {
+        console.warn('[PDFService] File download failed, continuing without document text');
+        console.warn('[PDFService] This could be due to:');
+        console.warn('  - File not found in Supabase storage');
+        console.warn('  - Incorrect file path');
+        console.warn('  - Supabase environment variables not configured');
+        console.warn('  - Storage bucket access issues');
+        console.warn(`  - File path attempted: ${filePath}`);
+      } else {
+        console.warn('[PDFService] PDF.co API error, continuing without document text');
       }
       
-      throw error;
+      // Return a default response instead of throwing
+      return {
+        success: false,
+        text: '',
+        pages: 0,
+        confidence: 0,
+        skipped: true,
+        reason: error.message
+      };
     }
+  }
+
+  async performExtraction(filePath) {
+    // Download file from Supabase first
+    const fileBlob = await this.downloadFromSupabase(filePath);
+    
+    // Convert Blob to Buffer for FormData compatibility
+    const arrayBuffer = await fileBlob.arrayBuffer();
+    const fileBuffer = Buffer.from(arrayBuffer);
+    
+    // Upload file to PDF.co to get a URL
+    const formData = new FormData();
+    formData.append('file', fileBuffer, {
+      filename: 'document.pdf',
+      contentType: 'application/pdf'
+    });
+
+    const uploadResponse = await axios.post(`${this.baseURL}/file/upload`, formData, {
+      headers: {
+        'x-api-key': this.apiKey,
+        ...formData.getHeaders()
+      },
+      timeout: 10000 // 10 second timeout for upload
+    });
+
+    if (uploadResponse.data.error) {
+      throw new Error(`PDF.co upload error: ${uploadResponse.data.error}`);
+    }
+
+    console.log(`[PDFService] File uploaded to PDF.co: ${uploadResponse.data.url}`);
+
+    // Now extract text using the uploaded file URL
+    const extractResponse = await this.extractTextFromURL(uploadResponse.data.url);
+    console.log(`[PDFService] Text extraction completed, pages: ${extractResponse.pages}`);
+
+    return {
+      success: true,
+      text: extractResponse.text,
+      pages: extractResponse.pages,
+      confidence: extractResponse.confidence || 0.95
+    };
   }
 
   async uploadFile(filePath) {
@@ -114,7 +147,8 @@ class PDFService {
         headers: {
           'x-api-key': this.apiKey,
           'Content-Type': 'application/json'
-        }
+        },
+        timeout: 10000 // 10 second timeout for extraction
       });
 
       if (response.data.error) {
