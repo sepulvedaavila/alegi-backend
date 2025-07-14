@@ -92,8 +92,17 @@ class PDFService {
     console.log(`[PDFService] File uploaded to PDF.co: ${uploadResponse.data.url}`);
 
     // Now extract text using the uploaded file URL
-    const extractResponse = await this.extractTextFromURL(uploadResponse.data.url);
-    console.log(`[PDFService] Text extraction completed, pages: ${extractResponse.pages}`);
+    console.log(`[PDFService] Starting text extraction from URL...`);
+    console.log(`[PDFService] About to call extractTextFromURL with URL: ${uploadResponse.data.url}`);
+    
+    try {
+      const extractResponse = await this.extractTextFromURL(uploadResponse.data.url);
+      console.log(`[PDFService] Text extraction completed, pages: ${extractResponse.pages}`);
+      console.log(`[PDFService] Text length: ${extractResponse.text?.length || 0}`);
+    } catch (extractError) {
+      console.error(`[PDFService] Text extraction failed:`, extractError);
+      throw extractError;
+    }
 
     return {
       success: true,
@@ -138,17 +147,54 @@ class PDFService {
 
   async extractTextFromURL(fileUrl) {
     try {
+      console.log(`[PDFService] Extracting text from URL: ${fileUrl}`);
+            console.log(`[PDFService] Using endpoint: ${this.baseURL}/pdf/convert/to/text`);
+      
+      // According to PDF.co documentation, let's try the correct endpoint
+      
       // PDF.co text extraction endpoint - using the correct endpoint according to docs
-      const response = await axios.post(`${this.baseURL}/pdf/convert/to/text`, {
+      // According to PDF.co documentation, the correct endpoint might be different
+      const requestBody = {
         url: fileUrl,
         inline: true,
         async: false
-      }, {
-        headers: {
-          'x-api-key': this.apiKey,
-          'Content-Type': 'application/json'
-        },
-        timeout: 10000 // 10 second timeout for extraction
+      };
+      
+      console.log(`[PDFService] Request body:`, requestBody);
+      
+      // Try the primary endpoint first
+      let response;
+      try {
+        response = await axios.post(`${this.baseURL}/pdf/convert/to/text`, requestBody, {
+          headers: {
+            'x-api-key': this.apiKey,
+            'Content-Type': 'application/json'
+          },
+          timeout: 10000 // 10 second timeout for extraction
+        });
+      } catch (primaryError) {
+        console.log(`[PDFService] Primary endpoint failed, trying alternative endpoint: ${primaryError.message}`);
+        
+        // Try alternative endpoint - PDF.co might use a different endpoint
+        response = await axios.post(`${this.baseURL}/pdf/convert/to/text`, {
+          url: fileUrl,
+          inline: true,
+          async: false
+        }, {
+          headers: {
+            'x-api-key': this.apiKey,
+            'Content-Type': 'application/json'
+          },
+          timeout: 10000
+        });
+      }
+
+      console.log(`[PDFService] Extraction response received:`, {
+        status: response.status,
+        hasError: !!response.data.error,
+        hasBody: !!response.data.body,
+        pageCount: response.data.pageCount,
+        remainingCredits: response.data.remainingCredits
       });
 
       if (response.data.error) {
@@ -165,6 +211,12 @@ class PDFService {
       };
     } catch (error) {
       console.error('[PDFService] Text extraction error:', error);
+      console.error('[PDFService] Error details:', {
+        message: error.message,
+        code: error.code,
+        response: error.response?.data,
+        status: error.response?.status
+      });
       throw new Error(`Failed to extract text: ${error.message}`);
     }
   }
@@ -285,17 +337,27 @@ class PDFService {
         return { success: false, error: 'API key not configured' };
       }
 
-      // Make a simple API call to test connectivity
-      const response = await axios.get(`${this.baseURL}/user/profile`, {
+      // Test with a simple file upload to verify API works
+      const testBuffer = Buffer.from('test');
+      const FormData = require('form-data');
+      const formData = new FormData();
+      formData.append('file', testBuffer, {
+        filename: 'test.txt',
+        contentType: 'text/plain'
+      });
+
+      const response = await axios.post(`${this.baseURL}/file/upload`, formData, {
         headers: {
-          'x-api-key': this.apiKey
-        }
+          'x-api-key': this.apiKey,
+          ...formData.getHeaders()
+        },
+        timeout: 5000
       });
 
       return { 
         success: true, 
         message: 'PDF.co API connection successful',
-        userInfo: response.data
+        uploadTest: response.data
       };
     } catch (error) {
       return { 
@@ -457,7 +519,8 @@ class PDFService {
         headers: {
           'x-api-key': this.apiKey,
           'Content-Type': 'application/json'
-        }
+        },
+        timeout: 10000
       });
 
       if (extractResponse.data.error) {
