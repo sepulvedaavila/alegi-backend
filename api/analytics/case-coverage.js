@@ -118,7 +118,7 @@ async function calculateDetailedCoverage() {
   try {
     const { data, error } = await supabase
       .from('case_briefs')
-      .select('jurisdiction, case_type, outcome');
+      .select('jurisdiction, case_type, processing_status');
     
     if (error) throw error;
     
@@ -126,13 +126,13 @@ async function calculateDetailedCoverage() {
       totalCases: data.length,
       jurisdictions: new Set(data.map(c => c.jurisdiction)).size,
       caseTypes: new Set(data.map(c => c.case_type)).size,
-      outcomes: data.filter(c => c.outcome).length
+      completedCases: data.filter(c => c.processing_status === 'completed').length
     };
     
     return coverage;
   } catch (error) {
     console.error('Error calculating detailed coverage:', error);
-    return { totalCases: 0, jurisdictions: 0, caseTypes: 0, outcomes: 0 };
+    return { totalCases: 0, jurisdictions: 0, caseTypes: 0, completedCases: 0 };
   }
 }
 

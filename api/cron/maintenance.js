@@ -26,7 +26,7 @@ async function calculateDetailedCoverage() {
   try {
     const { data, error } = await supabase
       .from('case_briefs')
-      .select('jurisdiction, case_type, outcome');
+      .select('jurisdiction, case_type, processing_status');
     
     if (error) throw error;
     
@@ -34,13 +34,13 @@ async function calculateDetailedCoverage() {
       totalCases: data.length,
       jurisdictions: new Set(data.map(c => c.jurisdiction)).size,
       caseTypes: new Set(data.map(c => c.case_type)).size,
-      outcomes: data.filter(c => c.outcome).length
+      completedCases: data.filter(c => c.processing_status === 'completed').length
     };
     
     return coverage;
   } catch (error) {
     console.error('Error calculating detailed coverage:', error);
-    return { totalCases: 0, jurisdictions: 0, caseTypes: 0, outcomes: 0 };
+    return { totalCases: 0, jurisdictions: 0, caseTypes: 0, completedCases: 0 };
   }
 }
 
@@ -48,7 +48,7 @@ async function calculateDataQualityScore() {
   try {
     const { data, error } = await supabase
       .from('case_briefs')
-      .select('case_description, evidence_count, parties_count');
+      .select('case_narrative, processing_status, ai_processed');
     
     if (error) throw error;
     
@@ -58,27 +58,23 @@ async function calculateDataQualityScore() {
     data.forEach(caseData => {
       let caseScore = 0;
       
-      // Score based on description completeness
-      if (caseData.case_description && caseData.case_description.length > 100) {
+      // Score based on narrative completeness
+      if (caseData.case_narrative && caseData.case_narrative.length > 100) {
         caseScore += 30;
-      } else if (caseData.case_description && caseData.case_description.length > 50) {
+      } else if (caseData.case_narrative && caseData.case_narrative.length > 50) {
         caseScore += 20;
       }
       
-      // Score based on evidence
-      if (caseData.evidence_count > 5) {
+      // Score based on processing status
+      if (caseData.processing_status === 'completed') {
         caseScore += 40;
-      } else if (caseData.evidence_count > 2) {
-        caseScore += 25;
-      } else if (caseData.evidence_count > 0) {
-        caseScore += 10;
+      } else if (caseData.processing_status === 'processing') {
+        caseScore += 20;
       }
       
-      // Score based on parties
-      if (caseData.parties_count > 2) {
+      // Score based on AI processing
+      if (caseData.ai_processed) {
         caseScore += 30;
-      } else if (caseData.parties_count > 1) {
-        caseScore += 20;
       }
       
       totalScore += Math.min(100, caseScore);

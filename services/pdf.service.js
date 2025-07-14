@@ -107,7 +107,9 @@ class PDFService {
     try {
       // PDF.co text extraction endpoint - using the correct endpoint according to docs
       const response = await axios.post(`${this.baseURL}/pdf/convert/to/text`, {
-        url: fileUrl
+        url: fileUrl,
+        inline: true,
+        async: false
       }, {
         headers: {
           'x-api-key': this.apiKey,
@@ -119,7 +121,14 @@ class PDFService {
         throw new Error(`PDF.co extraction error: ${response.data.error}`);
       }
 
-      return response.data;
+      // PDFco returns 'body' for the extracted text, not 'text'
+      return {
+        text: response.data.body || '',
+        pages: response.data.pageCount || 1,
+        confidence: 0.95,
+        remainingCredits: response.data.remainingCredits,
+        credits: response.data.credits
+      };
     } catch (error) {
       console.error('[PDFService] Text extraction error:', error);
       throw new Error(`Failed to extract text: ${error.message}`);
@@ -407,7 +416,9 @@ class PDFService {
 
       // Extract text
       const extractResponse = await axios.post(`${this.baseURL}/pdf/convert/to/text`, {
-        url: uploadResponse.data.url
+        url: uploadResponse.data.url,
+        inline: true,
+        async: false
       }, {
         headers: {
           'x-api-key': this.apiKey,
@@ -423,9 +434,11 @@ class PDFService {
 
       return {
         success: true,
-        text: extractResponse.data.text,
-        pages: extractResponse.data.pages || 1,
-        confidence: extractResponse.data.confidence || 0.95
+        text: extractResponse.data.body || '',
+        pages: extractResponse.data.pageCount || 1,
+        confidence: extractResponse.data.confidence || 0.95,
+        remainingCredits: extractResponse.data.remainingCredits,
+        credits: extractResponse.data.credits
       };
     } catch (error) {
       console.error('[PDFService] Direct extraction error:', error);

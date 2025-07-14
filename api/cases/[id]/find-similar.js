@@ -103,8 +103,8 @@ async function searchInternalSimilarCases(caseData, filters) {
       .neq('id', caseData.id);
     
     // Apply additional filters
-    if (filters.outcome) {
-      query = query.eq('outcome', filters.outcome);
+    if (filters.processing_status) {
+      query = query.eq('processing_status', filters.processing_status);
     }
     
     const { data, error } = await query.limit(50);
