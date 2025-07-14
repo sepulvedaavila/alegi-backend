@@ -16,8 +16,35 @@ class PDFService {
 
       console.log(`[PDFService] Extracting text from: ${filePath}`);
 
-      // Use the direct PDF.co API approach - no need to upload first
-      const extractResponse = await this.extractTextFromURL(filePath);
+      // Download file from Supabase first
+      const fileBlob = await this.downloadFromSupabase(filePath);
+      
+      // Convert Blob to Buffer for FormData compatibility
+      const arrayBuffer = await fileBlob.arrayBuffer();
+      const fileBuffer = Buffer.from(arrayBuffer);
+      
+      // Upload file to PDF.co to get a URL
+      const formData = new FormData();
+      formData.append('file', fileBuffer, {
+        filename: 'document.pdf',
+        contentType: 'application/pdf'
+      });
+
+      const uploadResponse = await axios.post(`${this.baseURL}/file/upload`, formData, {
+        headers: {
+          'x-api-key': this.apiKey,
+          ...formData.getHeaders()
+        }
+      });
+
+      if (uploadResponse.data.error) {
+        throw new Error(`PDF.co upload error: ${uploadResponse.data.error}`);
+      }
+
+      console.log(`[PDFService] File uploaded to PDF.co: ${uploadResponse.data.url}`);
+
+      // Now extract text using the uploaded file URL
+      const extractResponse = await this.extractTextFromURL(uploadResponse.data.url);
       console.log(`[PDFService] Text extraction completed, pages: ${extractResponse.pages}`);
 
       return {
@@ -379,7 +406,7 @@ class PDFService {
       console.log(`[PDFService] File uploaded, URL: ${uploadResponse.data.url}`);
 
       // Extract text
-      const extractResponse = await axios.post(`${this.baseURL}/extract-text`, {
+      const extractResponse = await axios.post(`${this.baseURL}/pdf/convert/to/text`, {
         url: uploadResponse.data.url
       }, {
         headers: {
