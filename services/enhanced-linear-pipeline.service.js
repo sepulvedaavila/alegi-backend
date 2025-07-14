@@ -1,10 +1,6 @@
 // services/enhanced-linear-pipeline.service.js
 // Comprehensive ALEGI processing pipeline implementing all 11 features
 const { createClient } = require('@supabase/supabase-js');
-const AIService = require('./ai.service');
-const PDFService = require('./pdf.service');
-const CourtListenerService = require('./courtlistener.service');
-const ErrorTrackingService = require('./error-tracking.service');
 const Sentry = require('@sentry/node');
 
 class EnhancedLinearPipelineService {
@@ -14,11 +10,11 @@ class EnhancedLinearPipelineService {
       ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
       : null;
     
-    // Initialize services
-    this.aiService = AIService; // AIService is already instantiated as singleton
-    this.pdfService = PDFService; // PDFService is already instantiated as singleton
-    this.courtListenerService = CourtListenerService; // CourtListenerService is already instantiated as singleton
-    this.errorTrackingService = ErrorTrackingService; // ErrorTrackingService is already instantiated as singleton
+    // Initialize services - these are singleton instances
+    this.aiService = require('./ai.service');
+    this.pdfService = require('./pdf.service');
+    this.courtListenerService = require('./courtlistener.service');
+    this.errorTrackingService = require('./error-tracking.service');
   }
 
   async executeEnhancedPipeline(caseId) {
@@ -53,6 +49,7 @@ class EnhancedLinearPipelineService {
         financialPrediction: null,
         timelineEstimate: null,
         similarCases: null,
+        analyzedCases: null,
         lawUpdates: null
       }
     };
@@ -87,6 +84,9 @@ class EnhancedLinearPipelineService {
           stepNumber: stepNumber,
           context: context.data
         });
+        
+        // Also log to enhanced_processing_errors table
+        await this.logEnhancedProcessingError(caseId, step.name, error);
         
         // Update case status to failed
         await this.updateCaseStatus(caseId, 'failed', error.message);
@@ -136,9 +136,8 @@ class EnhancedLinearPipelineService {
             await this.supabase
               .from('case_documents')
               .update({ 
-                processing_status: 'failed',
-                error_message: `Invalid file path: ${validation.error}`,
-                processed_at: new Date().toISOString()
+                extraction_status: 'failed',
+                error_message: `Invalid file path: ${validation.error}`
               })
               .eq('id', document.id);
             
@@ -157,8 +156,7 @@ class EnhancedLinearPipelineService {
             .from('case_documents')
             .update({ 
               ai_extracted_text: extractedText.text,
-              processing_status: 'completed',
-              processed_at: new Date().toISOString()
+              extraction_status: 'completed'
             })
             .eq('id', document.id);
           
@@ -187,9 +185,8 @@ class EnhancedLinearPipelineService {
             await this.supabase
               .from('case_documents')
               .update({ 
-                processing_status: 'failed',
-                error_message: error.message,
-                processed_at: new Date().toISOString()
+                extraction_status: 'failed',
+                error_message: error.message
               })
               .eq('id', document.id);
           } catch (updateError) {
@@ -246,7 +243,7 @@ class EnhancedLinearPipelineService {
       .upsert({
         case_id: caseId,
         analysis_type: 'intake',
-        analysis_data: intakeAnalysis,
+        result: intakeAnalysis,
         created_at: new Date().toISOString()
       });
     
@@ -285,7 +282,7 @@ class EnhancedLinearPipelineService {
       .upsert({
         case_id: caseId,
         analysis_type: 'precedent',
-        analysis_data: {
+        result: {
           precedents: precedentResults.results || [],
           analysis: precedentAnalysis,
           total_found: precedentResults.count || 0
@@ -336,7 +333,7 @@ class EnhancedLinearPipelineService {
       .upsert({
         case_id: caseId,
         analysis_type: 'judge_trends',
-        analysis_data: {
+        result: {
           judgeName,
           courtName,
           trends: judgeTrends,
@@ -385,7 +382,7 @@ class EnhancedLinearPipelineService {
       .upsert({
         case_id: caseId,
         analysis_type: 'similar_cases',
-        analysis_data: {
+        result: {
           courtListenerCases: courtListenerCases.results || [],
           internalCases,
           analysis: similarCaseAnalysis
@@ -400,6 +397,16 @@ class EnhancedLinearPipelineService {
       analysis: similarCaseAnalysis,
       closestMatches: similarCaseAnalysis.closestMatches || [],
       outcomePatterns: similarCaseAnalysis.outcomePatterns || []
+    };
+    
+    // Feature #11: Analyzed Cases (historical case analysis)
+    context.features.analyzedCases = {
+      total: (courtListenerCases.results || []).length + internalCases.length,
+      successfulCases: similarCaseAnalysis.successfulCases || [],
+      unsuccessfulCases: similarCaseAnalysis.unsuccessfulCases || [],
+      settlementCases: similarCaseAnalysis.settlementCases || [],
+      patterns: similarCaseAnalysis.outcomePatterns || [],
+      insights: similarCaseAnalysis.insights || []
     };
     
     console.log(`✅ Similar case finder completed for case ${caseId}`);
@@ -428,7 +435,7 @@ class EnhancedLinearPipelineService {
       .upsert({
         case_id: caseId,
         analysis_type: 'risk_assessment',
-        analysis_data: riskAnalysis,
+        result: riskAnalysis,
         created_at: new Date().toISOString()
       });
     
@@ -467,7 +474,7 @@ class EnhancedLinearPipelineService {
       .upsert({
         case_id: caseId,
         analysis_type: 'cost_estimate',
-        analysis_data: costEstimate,
+        result: costEstimate,
         created_at: new Date().toISOString()
       });
     
@@ -508,7 +515,7 @@ class EnhancedLinearPipelineService {
       .upsert({
         case_id: caseId,
         analysis_type: 'financial_prediction',
-        analysis_data: financialPrediction,
+        result: financialPrediction,
         created_at: new Date().toISOString()
       });
     
@@ -549,7 +556,7 @@ class EnhancedLinearPipelineService {
       .upsert({
         case_id: caseId,
         analysis_type: 'settlement_analysis',
-        analysis_data: settlementAnalysis,
+        result: settlementAnalysis,
         created_at: new Date().toISOString()
       });
     
@@ -592,7 +599,7 @@ class EnhancedLinearPipelineService {
       .upsert({
         case_id: caseId,
         analysis_type: 'outcome_probability',
-        analysis_data: outcomeProbability,
+        result: outcomeProbability,
         created_at: new Date().toISOString()
       });
     
@@ -634,7 +641,7 @@ class EnhancedLinearPipelineService {
       .upsert({
         case_id: caseId,
         analysis_type: 'timeline_estimate',
-        analysis_data: timelineEstimate,
+        result: timelineEstimate,
         created_at: new Date().toISOString()
       });
     
@@ -671,7 +678,7 @@ class EnhancedLinearPipelineService {
       .upsert({
         case_id: caseId,
         analysis_type: 'law_updates',
-        analysis_data: lawUpdates,
+        result: lawUpdates,
         created_at: new Date().toISOString()
       });
     
@@ -706,7 +713,7 @@ class EnhancedLinearPipelineService {
       .upsert({
         case_id: caseId,
         analysis_type: 'comprehensive',
-        analysis_data: {
+        result: {
           features: context.features,
           summary: comprehensiveAnalysis.summary,
           recommendations: comprehensiveAnalysis.recommendations,
@@ -715,18 +722,47 @@ class EnhancedLinearPipelineService {
         created_at: new Date().toISOString()
       });
     
+    // Store predictions in the dedicated case_predictions table
+    await this.storeFinalPredictions(caseId, context.features);
+    
     // Update case with processing completion
     await this.supabase
       .from('case_briefs')
       .update({
         processing_status: 'completed',
         ai_processed: true,
-        last_ai_update: new Date().toISOString(),
-        analysis_summary: comprehensiveAnalysis.summary
+        last_ai_update: new Date().toISOString()
       })
       .eq('id', caseId);
     
     console.log(`✅ All analysis integrated for case ${caseId}`);
+  }
+  
+  // Store final predictions in case_predictions table
+  async storeFinalPredictions(caseId, features) {
+    const predictionData = {
+      case_id: caseId,
+      outcome_prediction_score: features.outcomeProbability?.probabilityScore || null,
+      confidence_prediction_percentage: features.outcomeProbability?.confidence || null,
+      estimated_financial_outcome: features.financialPrediction?.estimatedOutcome || null,
+      financial_outcome_range: features.financialPrediction?.outcomeRange || {},
+      litigation_cost_estimate: features.costEstimator?.totalEstimatedCost || null,
+      litigation_cost_range: features.costEstimator?.costRange || {},
+      settlement_success_rate: features.settlementAnalysis?.settlementSuccessRate || null,
+      risk_score: features.riskAssessment?.overallRiskScore || null,
+      precedent_cases: features.precedentAnalysis?.precedents || [],
+      similar_cases: features.similarCases?.courtListenerCases || [],
+      analyzed_cases: features.analyzedCases?.patterns || [],
+      real_time_law_changes: features.lawUpdates?.recentChanges || [],
+      average_time_resolution: features.timelineEstimate?.estimatedDays || null,
+      resolution_time_range: features.timelineEstimate?.timelineRange || {},
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    
+    await this.supabase
+      .from('case_predictions')
+      .upsert(predictionData);
   }
 
   // Helper methods
@@ -738,7 +774,6 @@ class EnhancedLinearPipelineService {
       last_ai_update: new Date().toISOString()
     };
     
-    // Use processing_error column instead of error_message since it doesn't exist
     if (errorMessage) {
       updateData.processing_error = errorMessage;
     }
@@ -748,11 +783,36 @@ class EnhancedLinearPipelineService {
       .update(updateData)
       .eq('id', caseId);
   }
+  
+  async logEnhancedProcessingError(caseId, stageName, error) {
+    if (!this.supabase) return;
+    
+    try {
+      await this.supabase
+        .from('enhanced_processing_errors')
+        .insert({
+          id: `${caseId}-${stageName}-${Date.now()}`,
+          case_id: caseId,
+          processing_type: 'enhanced_pipeline',
+          stage_name: stageName,
+          error_message: error.message,
+          error_stack: error.stack,
+          error_context: {
+            timestamp: new Date().toISOString(),
+            errorType: error.name || 'Error'
+          },
+          severity: 'error',
+          created_at: new Date().toISOString()
+        });
+    } catch (logError) {
+      console.error('Failed to log enhanced processing error:', logError);
+    }
+  }
 
   async updateProcessingProgress(caseId, currentStep, totalSteps, stepName) {
     if (!this.supabase) return;
     
-    // Update progress in case_briefs table since case_processing_progress doesn't exist
+    // Update progress in case_briefs table
     await this.supabase
       .from('case_briefs')
       .update({
@@ -760,6 +820,19 @@ class EnhancedLinearPipelineService {
         step_completed_at: new Date().toISOString()
       })
       .eq('id', caseId);
+    
+    // Also record in case_processing_stages table for detailed tracking
+    await this.supabase
+      .from('case_processing_stages')
+      .upsert({
+        id: `${caseId}-${stepName}`,
+        case_id: caseId,
+        stage_name: stepName,
+        stage_status: 'completed',
+        completed_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
   }
 
   async searchInternalSimilarCases(caseData, intakeAnalysis) {

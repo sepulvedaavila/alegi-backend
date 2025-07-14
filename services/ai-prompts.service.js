@@ -192,7 +192,29 @@ const AI_PROMPTS = {
         ],
         "trends": ["identified trends in similar cases"],
         "risk_factors": ["risk factors identified from similar cases"],
-        "opportunities": ["opportunities identified from similar cases"]
+        "opportunities": ["opportunities identified from similar cases"],
+        "successfulCases": [
+          {
+            "case_id": "case identifier",
+            "outcome": "successful outcome details",
+            "key_factors": ["factors that led to success"]
+          }
+        ],
+        "unsuccessfulCases": [
+          {
+            "case_id": "case identifier", 
+            "outcome": "unsuccessful outcome details",
+            "key_factors": ["factors that led to failure"]
+          }
+        ],
+        "settlementCases": [
+          {
+            "case_id": "case identifier",
+            "settlement_amount": 0,
+            "settlement_factors": ["factors influencing settlement"]
+          }
+        ],
+        "insights": ["key insights derived from case analysis"]
       }
     `
   },
@@ -309,6 +331,12 @@ const AI_PROMPTS = {
           "confidence": "low/medium/high"
         },
         "confidence": "low/medium/high",
+        "estimatedOutcome": 0,
+        "outcomeRange": {
+          "low": 0,
+          "likely": 0,
+          "high": 0
+        },
         "factors": [
           {
             "factor": "financial factor",
@@ -344,6 +372,7 @@ const AI_PROMPTS = {
         "recommendation": "settle/trial/neutral",
         "settlementProbability": 0-100,
         "trialProbability": 0-100,
+        "settlementSuccessRate": 0-100,
         "settlementAdvantages": [
           {
             "advantage": "advantage of settlement",
@@ -394,6 +423,7 @@ const AI_PROMPTS = {
         "successProbability": 0-100,
         "failureProbability": 0-100,
         "settlementProbability": 0-100,
+        "probabilityScore": 0-100,
         "confidence": "low/medium/high",
         "factors": {
           "jurisdiction": {
@@ -437,10 +467,15 @@ const AI_PROMPTS = {
       Provide timeline estimation in JSON format:
       {
         "estimatedDuration": 0,
+        "estimatedDays": 0,
         "durationRange": {
           "min": 0,
           "max": 0,
           "unit": "days/months/years"
+        },
+        "timelineRange": {
+          "min": 0,
+          "max": 0
         },
         "keyMilestones": [
           {
