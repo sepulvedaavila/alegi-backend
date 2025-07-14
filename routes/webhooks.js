@@ -28,8 +28,10 @@ router.post('/external/case-briefs', verifyExternalWebhook, async (req, res) => 
     
     // Only process INSERT and UPDATE operations
     if (type === 'INSERT' || type === 'UPDATE') {
-      // Execute enhanced pipeline asynchronously
-      setImmediate(async () => {
+      console.log(`Enhanced ALEGI Pipeline triggered for case ${record.id}`);
+      
+      // Execute enhanced pipeline asynchronously (don't await to avoid blocking webhook response)
+      (async () => {
         try {
           console.log(`Starting Enhanced ALEGI Pipeline for case ${record.id}`);
           const features = await enhancedPipeline.executeEnhancedPipeline(record.id);
@@ -38,21 +40,23 @@ router.post('/external/case-briefs', verifyExternalWebhook, async (req, res) => 
           console.error(`Enhanced ALEGI Pipeline failed for case ${record.id}:`, error);
           
           // Update case status to failed
-          await supabase
-            .from('case_briefs')
-            .update({ 
-              processing_status: 'failed',
-              processing_error: error.message
-            })
-            .eq('id', record.id);
+          try {
+            await supabase
+              .from('case_briefs')
+              .update({ 
+                processing_status: 'failed',
+                processing_error: error.message
+              })
+              .eq('id', record.id);
+          } catch (updateError) {
+            console.error(`Failed to update case status for ${record.id}:`, updateError);
+          }
             
           Sentry.captureException(error, {
             tags: { caseId: record.id, webhook: 'external', pipeline: 'enhanced' }
           });
         }
-      });
-      
-      console.log(`Enhanced ALEGI Pipeline triggered for case ${record.id}`);
+      })();
     }
     
     res.json({ 
@@ -79,7 +83,7 @@ router.post('/supabase/case-created', verifySupabaseWebhook, async (req, res) =>
     });
     
     // Execute enhanced pipeline asynchronously
-    setImmediate(async () => {
+    (async () => {
       try {
         console.log(`Starting Enhanced ALEGI Pipeline for case ${record.id}`);
         const features = await enhancedPipeline.executeEnhancedPipeline(record.id);
@@ -88,19 +92,23 @@ router.post('/supabase/case-created', verifySupabaseWebhook, async (req, res) =>
         console.error(`Enhanced ALEGI Pipeline failed for case ${record.id}:`, error);
         
         // Update case status to failed
-        await supabase
-          .from('case_briefs')
-          .update({ 
-            processing_status: 'failed',
-            error_message: error.message
-          })
-          .eq('id', record.id);
+        try {
+          await supabase
+            .from('case_briefs')
+            .update({ 
+              processing_status: 'failed',
+              processing_error: error.message
+            })
+            .eq('id', record.id);
+        } catch (updateError) {
+          console.error(`Failed to update case status for ${record.id}:`, updateError);
+        }
           
         Sentry.captureException(error, {
           tags: { caseId: record.id, webhook: 'supabase', pipeline: 'enhanced' }
         });
       }
-    });
+    })();
     
     res.json({ 
       success: true, 
@@ -127,7 +135,7 @@ router.post('/supabase/document-uploaded', verifySupabaseWebhook, async (req, re
     // When a new document is uploaded, re-run the enhanced pipeline for the case
     if (record.case_id) {
       // Execute enhanced pipeline asynchronously
-      setImmediate(async () => {
+      (async () => {
         try {
           console.log(`Re-running Enhanced ALEGI Pipeline for case ${record.case_id} after document upload`);
           const features = await enhancedPipeline.executeEnhancedPipeline(record.case_id);
@@ -224,7 +232,7 @@ async function handleNewCaseBrief(caseBrief, res) {
     console.log('Processing new case brief:', caseBrief.id);
     
     // Execute enhanced pipeline asynchronously
-    setImmediate(async () => {
+    (async () => {
       try {
         console.log(`Starting Enhanced ALEGI Pipeline for case ${caseBrief.id}`);
         const features = await enhancedPipeline.executeEnhancedPipeline(caseBrief.id);
@@ -279,7 +287,7 @@ async function handleNewDocument(document, res) {
     // When a new document is uploaded, re-run the enhanced pipeline for the case
     if (document.case_id) {
       // Execute enhanced pipeline asynchronously
-      setImmediate(async () => {
+      (async () => {
         try {
           console.log(`Re-running Enhanced ALEGI Pipeline for case ${document.case_id} after document upload`);
           const features = await enhancedPipeline.executeEnhancedPipeline(document.case_id);
