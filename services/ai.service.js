@@ -154,11 +154,29 @@ class AIService {
       // Remove operation from options as it's not a valid OpenAI API parameter
       const { operation, ...openAIOptions } = options;
       
-      const response = await this.openai.chat.completions.create({
+      // Ensure proper request format
+      const requestBody = {
         model,
         messages,
         ...openAIOptions
+      };
+
+      // Validate required fields
+      if (!model) {
+        throw new Error('Model is required for OpenAI API call');
+      }
+      if (!messages || !Array.isArray(messages) || messages.length === 0) {
+        throw new Error('Messages array is required for OpenAI API call');
+      }
+
+      console.log(`[AIService] OpenAI request:`, {
+        model,
+        messageCount: messages.length,
+        estimatedTokens,
+        operation
       });
+      
+      const response = await this.openai.chat.completions.create(requestBody);
       
       clearTimeout(timeoutId);
       

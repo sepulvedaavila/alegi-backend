@@ -148,46 +148,24 @@ class PDFService {
   async extractTextFromURL(fileUrl) {
     try {
       console.log(`[PDFService] Extracting text from URL: ${fileUrl}`);
-            console.log(`[PDFService] Using endpoint: ${this.baseURL}/pdf/convert/to/text`);
+      console.log(`[PDFService] Using endpoint: ${this.baseURL}/pdf/convert/to/text`);
       
-      // According to PDF.co documentation, let's try the correct endpoint
-      
-      // PDF.co text extraction endpoint - using the correct endpoint according to docs
-      // According to PDF.co documentation, the correct endpoint might be different
+      // Correct PDF.co API request format
       const requestBody = {
         url: fileUrl,
-        inline: true,
+        outputFormat: 'text',
         async: false
       };
       
       console.log(`[PDFService] Request body:`, requestBody);
       
-      // Try the primary endpoint first
-      let response;
-      try {
-        response = await axios.post(`${this.baseURL}/pdf/convert/to/text`, requestBody, {
-          headers: {
-            'x-api-key': this.apiKey,
-            'Content-Type': 'application/json'
-          },
-          timeout: 10000 // 10 second timeout for extraction
-        });
-      } catch (primaryError) {
-        console.log(`[PDFService] Primary endpoint failed, trying alternative endpoint: ${primaryError.message}`);
-        
-        // Try alternative endpoint - PDF.co might use a different endpoint
-        response = await axios.post(`${this.baseURL}/pdf/convert/to/text`, {
-          url: fileUrl,
-          inline: true,
-          async: false
-        }, {
-          headers: {
-            'x-api-key': this.apiKey,
-            'Content-Type': 'application/json'
-          },
-          timeout: 10000
-        });
-      }
+      const response = await axios.post(`${this.baseURL}/pdf/convert/to/text`, requestBody, {
+        headers: {
+          'x-api-key': this.apiKey,
+          'Content-Type': 'application/json'
+        },
+        timeout: 10000 // 10 second timeout for extraction
+      });
 
       console.log(`[PDFService] Extraction response received:`, {
         status: response.status,
@@ -201,7 +179,7 @@ class PDFService {
         throw new Error(`PDF.co extraction error: ${response.data.error}`);
       }
 
-      // PDFco returns 'body' for the extracted text, not 'text'
+      // PDF.co returns 'body' for the extracted text
       return {
         text: response.data.body || '',
         pages: response.data.pageCount || 1,

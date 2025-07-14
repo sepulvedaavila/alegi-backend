@@ -61,7 +61,8 @@ class CourtListenerService {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        throw new Error(`CourtListener API error: ${response.status} ${response.statusText}`);
+        const errorText = await response.text();
+        throw new Error(`CourtListener API error: ${response.status} ${response.statusText} - ${errorText}`);
       }
 
       return await response.json();
