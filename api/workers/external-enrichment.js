@@ -1,4 +1,4 @@
-const queueService = require('../../../services/queue.service');
+const queueService = require('../../../services/queueService');
 const enhancedCaseWorker = require('../../../workers/enhanced-case.worker');
 
 module.exports = async (req, res) => {

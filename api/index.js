@@ -297,7 +297,7 @@ app.post('/api/cases/:caseId/documents', authenticateJWT, async (req, res) => {
     if (error) throw error;
     
     // Add to document processing queue instead of direct processing
-    const queueService = require('../services/queue.service');
+    const queueService = require('../services/queueService');
     await queueService.add('document-processing', {
       documentId: data.id,
       caseId: caseId,
@@ -881,7 +881,7 @@ app.post('/api/cases/:caseId/process', authenticateJWT, async (req, res) => {
     }
     
     // Add to processing queue
-    const queueService = require('../services/queue.service');
+    const queueService = require('../services/queueService');
             await queueService.add('case', {
       caseId: caseId,
       userId: req.user.id,
