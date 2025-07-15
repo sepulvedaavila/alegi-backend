@@ -112,9 +112,120 @@ const optionalAuth = async (req, res, next) => {
   next();
 };
 
+// Verify admin access
+const verifyAdminAuth = async (req, res, next) => {
+  try {
+    const user = await validateInternalServiceCall(req);
+    req.user = user;
+    
+    // Check if user has admin role
+    const isAdmin = user.role === 'admin' || 
+                   user.role === 'service_role' ||
+                   user.app_metadata?.role === 'admin' ||
+                   user.email?.includes('@alegi.io'); // Adjust this logic as needed
+
+    if (!isAdmin) {
+      console.warn(`🚫 Non-admin user attempted admin access: ${user.email}`);
+      return res.status(403).json({ 
+        error: 'Admin access required',
+        message: 'You do not have permission to access this resource'
+      });
+    }
+
+    console.log(`👑 Admin access granted: ${user.email}`);
+    next();
+
+  } catch (error) {
+    console.error('Admin authentication error:', error);
+    return res.status(403).json({ 
+      error: 'Admin authentication failed',
+      message: error.message
+    });
+  }
+};
+
+// Verify case ownership or admin access
+const verifyCaseAccess = async (req, res, next) => {
+  try {
+    const user = await validateInternalServiceCall(req);
+    req.user = user;
+    
+    const caseId = req.query.id || req.params.id;
+    
+    if (!caseId) {
+      return res.status(400).json({ 
+        error: 'Case ID required' 
+      });
+    }
+
+    // Service role can access all cases
+    if (user.role === 'service_role') {
+      console.log(`🔧 Service access granted: ${user.email} -> ${caseId}`);
+      return next();
+    }
+
+    // Check if user owns this case or is an admin
+    const { data: caseData, error } = await supabase
+      .from('case_briefs')
+      .select('user_id')
+      .eq('id', caseId)
+      .single();
+
+    if (error) {
+      return res.status(404).json({ 
+        error: 'Case not found',
+        caseId 
+      });
+    }
+
+    const isOwner = caseData.user_id === user.id;
+    const isAdmin = user.role === 'admin' || 
+                   user.app_metadata?.role === 'admin' ||
+                   user.email?.includes('@alegi.io');
+
+    if (!isOwner && !isAdmin) {
+      console.warn(`🚫 Unauthorized case access attempt: ${user.email} -> ${caseId}`);
+      return res.status(403).json({ 
+        error: 'Access denied',
+        message: 'You can only access your own cases'
+      });
+    }
+
+    console.log(`✅ Case access granted: ${user.email} -> ${caseId} (${isOwner ? 'owner' : 'admin'})`);
+    next();
+
+  } catch (error) {
+    console.error('Case access verification error:', error);
+    return res.status(403).json({ 
+      error: 'Access verification failed',
+      message: error.message
+    });
+  }
+};
+
+// Dev/testing bypass (only in development)
+const allowDevBypass = (req, res, next) => {
+  if (process.env.NODE_ENV === 'development' && req.headers['x-dev-bypass'] === 'true') {
+    console.warn('⚠️ DEV BYPASS: Skipping authentication in development mode');
+    req.user = {
+      id: 'dev-user',
+      email: 'dev@alegi.io',
+      role: 'admin',
+      app_metadata: { role: 'admin' }
+    };
+    return next();
+  }
+  
+  // Continue with normal auth flow
+  next();
+};
+
 module.exports = {
   validateSupabaseToken,
   validateInternalServiceCall,
   authenticateJWT,
-  optionalAuth
+  optionalAuth,
+  verifyAdminAuth,
+  verifyCaseAccess,
+  allowDevBypass
 }; 
