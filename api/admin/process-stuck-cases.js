@@ -15,12 +15,9 @@ async function handler(req, res) {
 
   // Apply admin authentication middleware
   await new Promise((resolve, reject) => {
-    allowDevBypass(req, res, (error) => {
+    verifyAdminAuth(req, res, (error) => {
       if (error) return reject(error);
-      verifyAdminAuth(req, res, (error) => {
-        if (error) return reject(error);
-        resolve();
-      });
+      resolve();
     });
   });
 

@@ -15,12 +15,9 @@ async function handler(req, res) {
 
   // Apply authentication middleware
   await new Promise((resolve, reject) => {
-    allowDevBypass(req, res, (error) => {
+    verifyCaseAccess(req, res, (error) => {
       if (error) return reject(error);
-      verifyCaseAccess(req, res, (error) => {
-        if (error) return reject(error);
-        resolve();
-      });
+      resolve();
     });
   });
 
