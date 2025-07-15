@@ -4,6 +4,7 @@ const Sentry = require('@sentry/node');
 const courtListenerService = require('./courtlistener.service');
 const { AI_PROMPTS } = require('./ai-prompts.service');
 const aiConfig = require('./ai.config');
+const costMonitorService = require('./costMonitor.service');
 
 class AIService {
   constructor() {
@@ -103,6 +104,32 @@ class AIService {
     return Math.ceil(text.length / aiConfig.tokenEstimation.charactersPerToken);
   }
 
+  // Calculate OpenAI API cost based on current pricing (as of 2024)
+  calculateOpenAICost(model, usage) {
+    const pricing = {
+      'gpt-4-turbo': {
+        input: 0.01 / 1000,  // $0.01 per 1K input tokens
+        output: 0.03 / 1000  // $0.03 per 1K output tokens
+      },
+      'gpt-4': {
+        input: 0.03 / 1000,  // $0.03 per 1K input tokens
+        output: 0.06 / 1000  // $0.06 per 1K output tokens
+      },
+      'gpt-3.5-turbo': {
+        input: 0.0015 / 1000,  // $0.0015 per 1K input tokens
+        output: 0.002 / 1000   // $0.002 per 1K output tokens
+      }
+    };
+
+    // Default to GPT-4 pricing if model not found
+    const modelPricing = pricing[model] || pricing['gpt-4'];
+    
+    const inputCost = (usage.prompt_tokens || 0) * modelPricing.input;
+    const outputCost = (usage.completion_tokens || 0) * modelPricing.output;
+    
+    return Math.round((inputCost + outputCost) * 100) / 100; // Round to 2 decimal places
+  }
+
   // Rate-limited OpenAI API call wrapper
   async makeOpenAICall(model, messages, options = {}) {
     // If using mock service, return mock response
@@ -180,15 +207,43 @@ class AIService {
       
       clearTimeout(timeoutId);
       
-      // Log actual usage for monitoring
+      // Log actual usage for monitoring and cost tracking
       if (response.usage) {
+        const usage = response.usage;
         console.log(`[AIService] OpenAI API call completed:`, {
           model,
-          promptTokens: response.usage.prompt_tokens,
-          completionTokens: response.usage.completion_tokens,
-          totalTokens: response.usage.total_tokens,
+          promptTokens: usage.prompt_tokens,
+          completionTokens: usage.completion_tokens,
+          totalTokens: usage.total_tokens,
           estimatedTokens: estimatedTokens
         });
+
+        // Calculate cost based on OpenAI pricing
+        const cost = this.calculateOpenAICost(model, usage);
+        
+        // Log cost if tracking is enabled and we have a user context
+        if (cost > 0 && options.userId) {
+          try {
+            await costMonitorService.logOperationCost(
+              `ai_${operation || 'request'}`,
+              options.userId,
+              {
+                aiCalls: 1,
+                aiCost: cost,
+                totalCost: cost,
+                duration: Date.now() - (options.startTime || Date.now()),
+                operations: {
+                  model,
+                  tokens: usage.total_tokens,
+                  promptTokens: usage.prompt_tokens,
+                  completionTokens: usage.completion_tokens
+                }
+              }
+            );
+          } catch (costError) {
+            console.warn('Failed to log AI operation cost:', costError.message);
+          }
+        }
       }
       
       return response;
@@ -220,7 +275,7 @@ class AIService {
   }
 
   // Step 1: Legal Case Intake Analysis
-  async executeIntakeAnalysis(caseData, evidenceData, documentContent) {
+  async executeIntakeAnalysis(caseData, evidenceData, documentContent, userId = null) {
     try {
       const { model, temperature, prompt } = AI_PROMPTS.INTAKE_ANALYSIS;
       
@@ -231,7 +286,9 @@ class AIService {
       }], {
         temperature,
         response_format: { type: 'json_object' },
-        operation: 'intake'
+        operation: 'intake',
+        userId,
+        startTime: Date.now()
       });
 
       console.log(`OpenAI API response received for case ${caseData.id}:`, {
@@ -490,7 +547,7 @@ class AIService {
   // Enhanced ALEGI Pipeline Methods
 
   // Precedent Analysis - Feature #3
-  async executePrecedentAnalysis(caseData, precedents, intakeAnalysis) {
+  async executePrecedentAnalysis(caseData, precedents, intakeAnalysis, userId = null) {
     try {
       const { model, temperature, prompt } = AI_PROMPTS.PRECEDENT_ANALYSIS;
       
@@ -499,7 +556,10 @@ class AIService {
         content: prompt(caseData, precedents, intakeAnalysis)
       }], {
         temperature,
-        response_format: { type: 'json_object' }
+        response_format: { type: 'json_object' },
+        operation: 'precedent_analysis',
+        userId,
+        startTime: Date.now()
       });
 
       const result = JSON.parse(response.choices[0].message.content);

@@ -1,8 +1,14 @@
 // services/costMonitor.service.js - Cost monitoring service
+const { createClient } = require('@supabase/supabase-js');
+const Sentry = require('@sentry/node');
 
 class CostMonitorService {
   constructor() {
-    this.costs = new Map();
+    // Initialize Supabase client
+    this.supabase = process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY
+      ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
+      : null;
+    
     this.limits = {
       daily: 100, // $100 per day
       monthly: 2000, // $2000 per month
@@ -10,32 +16,63 @@ class CostMonitorService {
     };
   }
 
-  async trackCost(service, cost, userId = 'default') {
-    try {
-      const now = new Date();
-      const dayKey = now.toISOString().split('T')[0];
-      const monthKey = now.toISOString().substring(0, 7); // YYYY-MM
+  // Log operation cost to cost_logs table as specified in CLAUDE.md
+  async logOperationCost(operationName, userId, costs) {
+    if (!this.supabase) {
+      console.warn('Supabase not available - cost logging disabled');
+      return;
+    }
 
-      if (!this.costs.has(userId)) {
-        this.costs.set(userId, {
-          daily: new Map(),
-          monthly: new Map(),
-          total: 0
+    try {
+      const costLogEntry = {
+        operation_name: operationName,
+        user_id: userId,
+        total_duration_ms: costs.duration || 0,
+        ai_calls: costs.aiCalls || 0,
+        ai_cost_usd: costs.aiCost || 0,
+        function_cost_usd: costs.functionCost || 0,
+        total_cost_usd: costs.totalCost || 0,
+        operations: costs.operations || {},
+        created_at: new Date().toISOString()
+      };
+
+      const { data, error } = await this.supabase
+        .from('cost_logs')
+        .insert(costLogEntry);
+
+      if (error) {
+        console.error('Failed to log cost data:', error);
+        Sentry.captureException(error, {
+          tags: { service: 'cost-monitor', operation: 'logOperationCost' },
+          extra: { operationName, userId, costs }
         });
+        return;
       }
 
-      const userCosts = this.costs.get(userId);
+      console.log(`💰 Cost logged: ${operationName} - $${costs.totalCost} (user: ${userId})`);
+      return data;
+    } catch (error) {
+      console.error('Cost logging error:', error);
+      Sentry.captureException(error, {
+        tags: { service: 'cost-monitor', operation: 'logOperationCost' },
+        extra: { operationName, userId, costs }
+      });
+    }
+  }
 
-      // Update daily costs
-      const dailyCost = userCosts.daily.get(dayKey) || 0;
-      userCosts.daily.set(dayKey, dailyCost + cost);
+  // Legacy method - maintained for backward compatibility
+  async trackCost(service, cost, userId = 'default') {
+    try {
+      // Use new cost logging method
+      await this.logOperationCost(service, userId, {
+        totalCost: cost,
+        aiCost: cost, // Assume all cost is AI-related for legacy calls
+        aiCalls: 1,
+        duration: 0
+      });
 
-      // Update monthly costs
-      const monthlyCost = userCosts.monthly.get(monthKey) || 0;
-      userCosts.monthly.set(monthKey, monthlyCost + cost);
-
-      // Update total costs
-      userCosts.total += cost;
+      // Get current totals for response
+      const totals = await this.getCostTotals(userId);
 
       console.log(`Cost tracked: $${cost} for ${service} (user: ${userId})`);
 
@@ -44,9 +81,9 @@ class CostMonitorService {
         cost,
         service,
         userId,
-        dailyTotal: userCosts.daily.get(dayKey),
-        monthlyTotal: userCosts.monthly.get(monthKey),
-        totalCost: userCosts.total
+        dailyTotal: totals.daily,
+        monthlyTotal: totals.monthly,
+        totalCost: totals.total
       };
     } catch (error) {
       console.error('Error tracking cost:', error);
@@ -54,37 +91,71 @@ class CostMonitorService {
     }
   }
 
+  // Get cost totals from database
+  async getCostTotals(userId) {
+    if (!this.supabase) {
+      return { daily: 0, monthly: 0, total: 0 };
+    }
+
+    try {
+      const now = new Date();
+      const today = now.toISOString().split('T')[0];
+      const thisMonth = now.toISOString().substring(0, 7); // YYYY-MM
+
+      // Get daily costs
+      const { data: dailyData } = await this.supabase
+        .from('cost_logs')
+        .select('total_cost_usd')
+        .eq('user_id', userId)
+        .gte('created_at', `${today}T00:00:00.000Z`)
+        .lt('created_at', `${today}T23:59:59.999Z`);
+
+      // Get monthly costs
+      const { data: monthlyData } = await this.supabase
+        .from('cost_logs')
+        .select('total_cost_usd')
+        .eq('user_id', userId)
+        .gte('created_at', `${thisMonth}-01T00:00:00.000Z`)
+        .lt('created_at', `${thisMonth}-31T23:59:59.999Z`);
+
+      // Get total costs
+      const { data: totalData } = await this.supabase
+        .from('cost_logs')
+        .select('total_cost_usd')
+        .eq('user_id', userId);
+
+      const daily = (dailyData || []).reduce((sum, log) => sum + (log.total_cost_usd || 0), 0);
+      const monthly = (monthlyData || []).reduce((sum, log) => sum + (log.total_cost_usd || 0), 0);
+      const total = (totalData || []).reduce((sum, log) => sum + (log.total_cost_usd || 0), 0);
+
+      return { daily, monthly, total };
+    } catch (error) {
+      console.error('Error getting cost totals:', error);
+      return { daily: 0, monthly: 0, total: 0 };
+    }
+  }
+
   async checkLimits(userId = 'default') {
     try {
-      if (!this.costs.has(userId)) {
-        return { withinLimits: true, limits: this.limits };
-      }
-
-      const userCosts = this.costs.get(userId);
-      const now = new Date();
-      const dayKey = now.toISOString().split('T')[0];
-      const monthKey = now.toISOString().substring(0, 7);
-
-      const dailyCost = userCosts.daily.get(dayKey) || 0;
-      const monthlyCost = userCosts.monthly.get(monthKey) || 0;
+      const totals = await this.getCostTotals(userId);
 
       const limits = {
-        daily: { limit: this.limits.daily, used: dailyCost, remaining: this.limits.daily - dailyCost },
-        monthly: { limit: this.limits.monthly, used: monthlyCost, remaining: this.limits.monthly - monthlyCost },
-        total: { limit: this.limits.total, used: userCosts.total, remaining: this.limits.total - userCosts.total }
+        daily: { limit: this.limits.daily, used: totals.daily, remaining: this.limits.daily - totals.daily },
+        monthly: { limit: this.limits.monthly, used: totals.monthly, remaining: this.limits.monthly - totals.monthly },
+        total: { limit: this.limits.total, used: totals.total, remaining: this.limits.total - totals.total }
       };
 
-      const withinLimits = dailyCost <= this.limits.daily && 
-                          monthlyCost <= this.limits.monthly && 
-                          userCosts.total <= this.limits.total;
+      const withinLimits = totals.daily <= this.limits.daily && 
+                          totals.monthly <= this.limits.monthly && 
+                          totals.total <= this.limits.total;
 
       return {
         withinLimits,
         limits,
         warnings: {
-          daily: dailyCost > this.limits.daily * 0.8,
-          monthly: monthlyCost > this.limits.monthly * 0.8,
-          total: userCosts.total > this.limits.total * 0.8
+          daily: totals.daily > this.limits.daily * 0.8,
+          monthly: totals.monthly > this.limits.monthly * 0.8,
+          total: totals.total > this.limits.total * 0.8
         }
       };
     } catch (error) {
@@ -93,25 +164,87 @@ class CostMonitorService {
     }
   }
 
-  getCosts(userId = 'default') {
-    if (!this.costs.has(userId)) {
-      return { daily: 0, monthly: 0, total: 0 };
-    }
-
-    const userCosts = this.costs.get(userId);
-    const now = new Date();
-    const dayKey = now.toISOString().split('T')[0];
-    const monthKey = now.toISOString().substring(0, 7);
-
-    return {
-      daily: userCosts.daily.get(dayKey) || 0,
-      monthly: userCosts.monthly.get(monthKey) || 0,
-      total: userCosts.total
-    };
+  // Alias for getCostTotals for backward compatibility
+  async getCosts(userId = 'default') {
+    return await this.getCostTotals(userId);
   }
 
-  resetCosts(userId = 'default') {
-    this.costs.delete(userId);
+  // Get detailed cost breakdown from database
+  async getCostBreakdown(userId, options = {}) {
+    if (!this.supabase) {
+      return { operations: [], total: 0, breakdown: {} };
+    }
+
+    try {
+      let query = this.supabase
+        .from('cost_logs')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      // Apply date filters if provided
+      if (options.startDate) {
+        query = query.gte('created_at', options.startDate);
+      }
+      if (options.endDate) {
+        query = query.lte('created_at', options.endDate);
+      }
+
+      // Apply limit
+      if (options.limit) {
+        query = query.limit(options.limit);
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      const operations = data || [];
+      const total = operations.reduce((sum, op) => sum + (op.total_cost_usd || 0), 0);
+      
+      // Group by operation name
+      const breakdown = operations.reduce((acc, op) => {
+        const name = op.operation_name;
+        if (!acc[name]) {
+          acc[name] = { count: 0, cost: 0, aiCalls: 0 };
+        }
+        acc[name].count += 1;
+        acc[name].cost += op.total_cost_usd || 0;
+        acc[name].aiCalls += op.ai_calls || 0;
+        return acc;
+      }, {});
+
+      return { operations, total, breakdown };
+    } catch (error) {
+      console.error('Error getting cost breakdown:', error);
+      return { operations: [], total: 0, breakdown: {} };
+    }
+  }
+
+  // Reset costs for testing (optional - only delete logs if specifically requested)
+  async resetCosts(userId = 'default', permanent = false) {
+    if (!permanent) {
+      console.warn('Cost reset called but permanent=false - no action taken');
+      return;
+    }
+
+    if (!this.supabase) {
+      console.warn('Supabase not available - cannot reset costs');
+      return;
+    }
+
+    try {
+      const { error } = await this.supabase
+        .from('cost_logs')
+        .delete()
+        .eq('user_id', userId);
+
+      if (error) throw error;
+      console.log(`Cost logs reset for user ${userId}`);
+    } catch (error) {
+      console.error('Error resetting costs:', error);
+      throw error;
+    }
   }
 }
 
