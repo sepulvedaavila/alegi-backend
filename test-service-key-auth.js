@@ -4,7 +4,7 @@ const request = require('supertest');
 
 // Mock environment
 process.env.NODE_ENV = 'development';
-process.env.SUPABASE_SERVICE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp1bmNrdHR3b2V1YWNvbGJncG51Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTY5ODUzNDAwMCwiZXhwIjoxODU2MzAwMDAwfQ.test-service-key';
+process.env.SUPABASE_SERVICE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.Y2Vfcm9sZSIsImlhdCI6MTY5ODUzNDAwMCwiZXhwIjoxODU2MzAwMDAwfQ.test-service-key';
 process.env.SUPABASE_WEBHOOK_SECRET = 'test-webhook-secret-123';
 process.env.INTERNAL_SERVICE_SECRET = 'test-internal-secret-456';
 
