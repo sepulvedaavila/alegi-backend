@@ -27,55 +27,116 @@ const validateSupabaseToken = async (req) => {
   const authHeader = req.headers.authorization;
   
   if (!authHeader) {
-    console.error('No authorization header provided');
-    throw new UnauthorizedError('No authorization header');
+    console.error('🔐 No authorization header provided');
+    throw new UnauthorizedError('Missing authorization header. Please provide: Authorization: Bearer YOUR_JWT_TOKEN');
   }
 
-  const token = authHeader.split(' ')[1];
+  if (!authHeader.startsWith('Bearer ')) {
+    console.error('🔐 Invalid authorization header format');
+    throw new UnauthorizedError('Authorization header must start with "Bearer ". Format: Authorization: Bearer YOUR_JWT_TOKEN');
+  }
+
+  const token = authHeader.substring(7); // Remove 'Bearer ' prefix
   
   if (!token) {
-    console.error('No token in authorization header');
-    throw new UnauthorizedError('No token provided');
+    console.error('🔐 No token in authorization header');
+    throw new UnauthorizedError('No token provided after "Bearer ". Please provide a valid JWT token.');
+  }
+
+  // Basic token format check
+  const tokenParts = token.split('.');
+  if (tokenParts.length !== 3) {
+    console.error('🔐 Invalid JWT format - should have 3 parts separated by dots');
+    throw new UnauthorizedError('Invalid JWT token format. Token should have 3 parts separated by dots.');
   }
   
   if (!supabase) {
-    console.error('Supabase client not initialized');
+    console.error('🔐 Supabase client not initialized');
     throw new UnauthorizedError('Authentication service not available');
   }
   
   try {
-    // Log token info for debugging (remove in production)
-    console.log('Validating token:', token.substring(0, 20) + '...');
+    // Log token info for debugging
+    console.log('🔐 Validating token:', token.substring(0, 20) + '... (length: ' + token.length + ')');
     
     const { data, error } = await supabase.auth.getUser(token);
     
     if (error) {
-      console.error('Supabase auth error:', error.message);
-      throw error;
+      console.error('🔐 Supabase auth error:', {
+        message: error.message,
+        status: error.status,
+        code: error.code
+      });
+      
+      // Provide specific error messages based on Supabase error
+      if (error.message?.includes('Invalid JWT')) {
+        throw new UnauthorizedError('Invalid JWT token. This could be because: 1) Token is expired, 2) Token is from wrong Supabase project, 3) Token is malformed. Please get a fresh token.');
+      } else if (error.message?.includes('expired')) {
+        throw new UnauthorizedError('JWT token has expired. Please log in again to get a fresh token.');
+      } else if (error.message?.includes('signature')) {
+        throw new UnauthorizedError('JWT signature verification failed. Token may be from wrong project or corrupted.');
+      } else {
+        throw new UnauthorizedError(`Token validation failed: ${error.message}`);
+      }
     }
     
     if (!data.user) {
-      console.error('No user data returned from Supabase');
-      throw new UnauthorizedError('Invalid token');
+      console.error('🔐 No user data returned from Supabase');
+      throw new UnauthorizedError('Token is valid but no user data found. Token may be expired.');
     }
     
-    console.log('Token validated for user:', data.user.id);
+    console.log('✅ Token validated for user:', data.user.email, '(' + data.user.id + ')');
     return data.user;
   } catch (error) {
-    console.error('Token validation error:', error);
-    throw new UnauthorizedError('Invalid token');
+    console.error('🔐 Token validation error:', error);
+    
+    // If it's already an UnauthorizedError, re-throw it
+    if (error instanceof UnauthorizedError) {
+      throw error;
+    }
+    
+    // For any other error, wrap it
+    throw new UnauthorizedError(`Authentication failed: ${error.message}`);
   }
 };
 
-// New function for internal service authentication
+// Enhanced function for multiple authentication methods
 const validateInternalServiceCall = async (req) => {
-  // Check for internal service headers
+  // Method 1: Check for Supabase Service Key authentication
+  const serviceKeyAuth = req.headers['x-supabase-service-key'];
+  if (serviceKeyAuth && serviceKeyAuth === process.env.SUPABASE_SERVICE_KEY) {
+    console.log('✅ Authenticated via Supabase Service Key');
+    return {
+      id: 'service-key-user',
+      email: 'service@alegi.io',
+      role: 'service_role',
+      app_metadata: {
+        provider: 'supabase_service_key',
+        providers: ['supabase_service_key']
+      }
+    };
+  }
+
+  // Method 2: Check for Webhook Secret authentication
+  const webhookSecret = req.headers['x-webhook-secret'];
+  if (webhookSecret && webhookSecret === process.env.SUPABASE_WEBHOOK_SECRET) {
+    console.log('✅ Authenticated via Webhook Secret');
+    return {
+      id: 'webhook-user',
+      email: 'webhook@alegi.io',
+      role: 'service_role',
+      app_metadata: {
+        provider: 'webhook_secret',
+        providers: ['webhook_secret']
+      }
+    };
+  }
+
+  // Method 3: Check for Internal Service Secret (existing)
   const internalServiceHeader = req.headers['x-internal-service'];
   const serviceSecret = req.headers['x-service-secret'];
-  
-  // Allow internal service calls if proper headers are present
   if (internalServiceHeader === 'alegi-backend' && serviceSecret === process.env.INTERNAL_SERVICE_SECRET) {
-    // Create a mock user object for internal service calls
+    console.log('✅ Authenticated via Internal Service Secret');
     return {
       id: 'internal-service',
       email: 'service@alegi.io',
@@ -86,9 +147,76 @@ const validateInternalServiceCall = async (req) => {
       }
     };
   }
+
+  // Method 4: Check for API Key authentication (simple)
+  const apiKey = req.headers['x-api-key'];
+  if (apiKey) {
+    // Check against multiple possible API keys
+    const validApiKeys = [
+      process.env.SUPABASE_SERVICE_KEY,
+      process.env.SUPABASE_WEBHOOK_SECRET,
+      process.env.INTERNAL_SERVICE_SECRET
+    ].filter(Boolean); // Remove undefined values
+
+    if (validApiKeys.includes(apiKey)) {
+      console.log('✅ Authenticated via API Key');
+      return {
+        id: 'api-key-user',
+        email: 'api@alegi.io',
+        role: 'service_role',
+        app_metadata: {
+          provider: 'api_key',
+          providers: ['api_key']
+        }
+      };
+    }
+  }
+
+  // Method 5: Check for Authorization Bearer with service key
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.substring(7);
+    
+    // Check if it's actually a service key instead of JWT
+    const validServiceKeys = [
+      process.env.SUPABASE_SERVICE_KEY,
+      process.env.SUPABASE_WEBHOOK_SECRET
+    ].filter(Boolean);
+
+    if (validServiceKeys.includes(token)) {
+      console.log('✅ Authenticated via Bearer Service Key');
+      return {
+        id: 'bearer-service-user',
+        email: 'bearer-service@alegi.io',
+        role: 'service_role',
+        app_metadata: {
+          provider: 'bearer_service_key',
+          providers: ['bearer_service_key']
+        }
+      };
+    }
+  }
   
-  // If not an internal service call, fall back to regular token validation
-  return await validateSupabaseToken(req);
+  // Method 6: Check for development bypass
+  if (process.env.NODE_ENV === 'development' && req.headers['x-dev-bypass'] === 'true') {
+    console.log('✅ Authenticated via Development Bypass');
+    return {
+      id: 'dev-user',
+      email: 'dev@alegi.io',
+      role: 'admin',
+      app_metadata: { role: 'admin', provider: 'dev_bypass' }
+    };
+  }
+
+  // Method 7: Fall back to regular JWT token validation
+  try {
+    const user = await validateSupabaseToken(req);
+    console.log('✅ Authenticated via JWT Token');
+    return user;
+  } catch (error) {
+    console.error('🔐 All authentication methods failed');
+    throw error;
+  }
 };
 
 const authenticateJWT = async (req, res, next) => {
@@ -220,9 +348,27 @@ const allowDevBypass = (req, res, next) => {
   next();
 };
 
+// Enhanced bypass that works with validateInternalServiceCall
+const validateWithDevBypass = async (req) => {
+  // Check for dev bypass first
+  if (process.env.NODE_ENV === 'development' && req.headers['x-dev-bypass'] === 'true') {
+    console.warn('⚠️ DEV BYPASS: Skipping authentication in development mode');
+    return {
+      id: 'dev-user',
+      email: 'dev@alegi.io',
+      role: 'admin',
+      app_metadata: { role: 'admin', provider: 'dev_bypass' }
+    };
+  }
+  
+  // Otherwise use normal validation
+  return await validateInternalServiceCall(req);
+};
+
 module.exports = {
   validateSupabaseToken,
   validateInternalServiceCall,
+  validateWithDevBypass,
   authenticateJWT,
   optionalAuth,
   verifyAdminAuth,
