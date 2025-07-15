@@ -11,14 +11,21 @@ class CaseProcessingWorker {
       : null;
     
     this.enhancedPipeline = new EnhancedLinearPipelineService();
+    this.isInitialized = false;
     
     // Register the case processing queue processor
     this.setupProcessor();
   }
 
   setupProcessor() {
-    queueService.setProcessor('case-processing', this.processCase.bind(this));
-    console.log('🏭 Case processing worker initialized');
+    try {
+      queueService.setProcessor('case-processing', this.processCase.bind(this));
+      this.isInitialized = true;
+      console.log('🏭 Case processing worker initialized successfully');
+    } catch (error) {
+      console.error('❌ Failed to initialize case processing worker:', error);
+      this.isInitialized = false;
+    }
   }
 
   async processCase(jobData) {
@@ -85,6 +92,11 @@ class CaseProcessingWorker {
 
   // Add a case to the processing queue
   async addCaseToQueue(caseId, userId, options = {}) {
+    if (!this.isInitialized) {
+      console.warn('⚠️ Worker not initialized, attempting to reinitialize...');
+      this.setupProcessor();
+    }
+
     const jobData = {
       caseId,
       userId,
@@ -93,14 +105,36 @@ class CaseProcessingWorker {
       timestamp: new Date().toISOString()
     };
 
-    const job = await queueService.add('case-processing', jobData, {
-      priority: options.priority || 1,
-      maxAttempts: options.maxAttempts || 3,
-      delay: options.delay || 0
-    });
+    try {
+      // Always try to add to queue first (works in memory even without database)
+      const job = await queueService.add('case-processing', jobData, {
+        priority: options.priority || 1,
+        maxAttempts: options.maxAttempts || 3,
+        delay: options.delay || 0
+      });
 
-    console.log(`📋 Added case ${caseId} to processing queue (job: ${job.id})`);
-    return job;
+      console.log(`📋 Added case ${caseId} to processing queue (job: ${job.id})`);
+      return job;
+    } catch (error) {
+      console.error('❌ Failed to add case to queue:', error);
+      console.log('🔄 Attempting direct processing as fallback...');
+      
+      // Fallback to immediate processing
+      setImmediate(async () => {
+        try {
+          await this.processCase(jobData);
+        } catch (processingError) {
+          console.error('❌ Fallback processing also failed:', processingError);
+        }
+      });
+      
+      // Return a mock job for consistency
+      return {
+        id: `fallback_${Date.now()}`,
+        status: 'fallback',
+        data: jobData
+      };
+    }
   }
 
   // Get the status of a case processing job

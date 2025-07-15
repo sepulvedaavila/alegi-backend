@@ -27,24 +27,52 @@ class QueueService {
         scheduled_for: options.delay ? new Date(Date.now() + options.delay).toISOString() : new Date().toISOString()
       };
 
-      // Store in database for persistence (if available)
+      // Store in database for persistence (if available and schema supports it)
       if (this.supabase) {
         try {
-          await this.supabase
+          console.log('💾 Attempting to store job in database:', job.id);
+          
+          // Try a simple insert first to test table schema
+          const simpleJob = {
+            id: job.id,
+            data: job.data,
+            status: job.status
+          };
+          
+          const { data, error } = await this.supabase
             .from('queue_jobs')
-            .insert(job);
+            .insert(simpleJob);
+          
+          if (error) {
+            console.error('❌ Database insert error (trying simple schema):', error);
+            
+            // If simple insert fails, it means the table doesn't exist or has permission issues
+            console.warn('⚠️ queue_jobs table schema incompatible, using in-memory queue only');
+            throw error;
+          } else {
+            console.log('✅ Job stored in database successfully (simple schema):', job.id);
+          }
         } catch (dbError) {
-          console.warn('Failed to persist job to database:', dbError.message);
+          console.error('❌ Failed to persist job to database:', {
+            message: dbError.message,
+            details: dbError.details || 'No additional details',
+            hint: dbError.hint || 'No hint available',
+            code: dbError.code || 'No error code'
+          });
+          console.log('📝 Note: The queue_jobs table may need to be created with proper schema');
+          // Continue without database persistence - fallback to in-memory only
         }
+      } else {
+        console.warn('⚠️ Supabase not available - storing job in memory only');
       }
 
-      // Also store in memory for immediate processing
+      // Store in memory for immediate processing (this is the primary queue now)
       if (!this.queues.has(queueName)) {
         this.queues.set(queueName, []);
       }
       this.queues.get(queueName).push(job);
 
-      console.log(`✅ Added job ${job.id} to queue ${queueName} with priority ${job.priority}`);
+      console.log(`✅ Added job ${job.id} to queue ${queueName} with priority ${job.priority} (in-memory)`);
 
       // Auto-trigger processing if not already running
       if (!this.isProcessing.get(queueName)) {
@@ -67,22 +95,10 @@ class QueueService {
   // Process a single job
   async processJob(job, processor) {
     try {
-      // Mark job as processing
+      // Mark job as processing (in-memory only for now)
       job.status = 'processing';
       job.started_at = new Date().toISOString();
       job.attempts++;
-
-      // Update in database
-      if (this.supabase) {
-        await this.supabase
-          .from('queue_jobs')
-          .update({
-            status: job.status,
-            started_at: job.started_at,
-            attempts: job.attempts
-          })
-          .eq('id', job.id);
-      }
 
       console.log(`🔄 Processing job ${job.id} from queue ${job.queue_name} (attempt ${job.attempts}/${job.max_attempts})`);
 
@@ -99,18 +115,6 @@ class QueueService {
       job.completed_at = new Date().toISOString();
       job.result = result;
 
-      // Update in database
-      if (this.supabase) {
-        await this.supabase
-          .from('queue_jobs')
-          .update({
-            status: job.status,
-            completed_at: job.completed_at,
-            result: result
-          })
-          .eq('id', job.id);
-      }
-
       console.log(`✅ Job ${job.id} completed successfully`);
       return job;
     } catch (error) {
@@ -118,19 +122,6 @@ class QueueService {
       job.status = job.attempts >= job.max_attempts ? 'failed' : 'pending';
       job.failed_at = new Date().toISOString();
       job.error = error.message;
-
-      // Update in database
-      if (this.supabase) {
-        await this.supabase
-          .from('queue_jobs')
-          .update({
-            status: job.status,
-            failed_at: job.failed_at,
-            error: job.error,
-            attempts: job.attempts
-          })
-          .eq('id', job.id);
-      }
 
       if (job.status === 'failed') {
         console.error(`❌ Job ${job.id} failed permanently after ${job.attempts} attempts:`, error);
@@ -158,33 +149,9 @@ class QueueService {
     }
 
     try {
-      // Load pending jobs from database if available
-      if (this.supabase) {
-        const { data: dbJobs } = await this.supabase
-          .from('queue_jobs')
-          .select('*')
-          .eq('queue_name', queueName)
-          .in('status', ['pending'])
-          .lte('scheduled_for', new Date().toISOString())
-          .order('priority', { ascending: false })
-          .order('created_at', { ascending: true })
-          .limit(10);
-
-        if (dbJobs && dbJobs.length > 0) {
-          // Merge with in-memory queue
-          if (!this.queues.has(queueName)) {
-            this.queues.set(queueName, []);
-          }
-          
-          const memoryQueue = this.queues.get(queueName);
-          dbJobs.forEach(dbJob => {
-            if (!memoryQueue.find(j => j.id === dbJob.id)) {
-              memoryQueue.push(dbJob);
-            }
-          });
-        }
-      }
-
+      console.log(`🔄 Processing queue: ${queueName}`);
+      
+      // Focus on in-memory queue processing (database might have schema issues)
       const queue = this.queues.get(queueName) || [];
       const pendingJobs = queue
         .filter(job => job.status === 'pending' && new Date(job.scheduled_for) <= new Date())
@@ -194,6 +161,8 @@ class QueueService {
           return new Date(a.created_at) - new Date(b.created_at);
         });
 
+      console.log(`📋 Found ${pendingJobs.length} pending jobs in queue ${queueName}`);
+
       if (pendingJobs.length === 0) {
         this.isProcessing.set(queueName, false);
         return;
@@ -202,8 +171,10 @@ class QueueService {
       // Process jobs one by one to avoid overwhelming the system
       for (const job of pendingJobs) {
         try {
+          console.log(`⚡ Processing job ${job.id}...`);
           await this.processJob(job, processor);
         } catch (error) {
+          console.error(`❌ Job ${job.id} failed:`, error.message);
           // Continue processing other jobs even if one fails
           continue;
         }
@@ -216,6 +187,7 @@ class QueueService {
       // Check if there are more jobs to process
       setTimeout(() => {
         if (this.hasMoreJobs(queueName)) {
+          console.log(`🔄 More jobs found in ${queueName}, continuing processing...`);
           this.processQueue(queueName);
         }
       }, 1000);
