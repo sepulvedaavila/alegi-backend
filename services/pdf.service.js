@@ -95,14 +95,9 @@ class PDFService {
     console.log(`[PDFService] Starting text extraction from URL...`);
     console.log(`[PDFService] About to call extractTextFromURL with URL: ${uploadResponse.data.url}`);
     
-    try {
-      const extractResponse = await this.extractTextFromURL(uploadResponse.data.url);
-      console.log(`[PDFService] Text extraction completed, pages: ${extractResponse.pages}`);
-      console.log(`[PDFService] Text length: ${extractResponse.text?.length || 0}`);
-    } catch (extractError) {
-      console.error(`[PDFService] Text extraction failed:`, extractError);
-      throw extractError;
-    }
+    const extractResponse = await this.extractTextFromURL(uploadResponse.data.url);
+    console.log(`[PDFService] Text extraction completed, pages: ${extractResponse.pages}`);
+    console.log(`[PDFService] Text length: ${extractResponse.text?.length || 0}`);
 
     return {
       success: true,
@@ -170,7 +165,7 @@ class PDFService {
       console.log(`[PDFService] Extraction response received:`, {
         status: response.status,
         hasError: !!response.data.error,
-        hasBody: !!response.data.body,
+        hasUrl: !!response.data.url,
         pageCount: response.data.pageCount,
         remainingCredits: response.data.remainingCredits
       });
@@ -179,13 +174,32 @@ class PDFService {
         throw new Error(`PDF.co extraction error: ${response.data.error}`);
       }
 
-      // PDF.co returns 'body' for the extracted text
+      // PDF.co returns a URL to the extracted text file, not the text directly
+      if (!response.data.url) {
+        throw new Error('PDF.co did not return a URL to the extracted text file');
+      }
+
+      console.log(`[PDFService] Downloading extracted text from: ${response.data.url}`);
+      
+      // Download the extracted text from the provided URL
+      const textResponse = await axios.get(response.data.url, {
+        timeout: 10000
+      });
+
+      if (textResponse.status !== 200) {
+        throw new Error(`Failed to download extracted text: HTTP ${textResponse.status}`);
+      }
+
+      const extractedText = textResponse.data;
+      console.log(`[PDFService] Successfully downloaded extracted text, length: ${extractedText.length} characters`);
+
       return {
-        text: response.data.body || '',
+        text: extractedText,
         pages: response.data.pageCount || 1,
         confidence: 0.95,
         remainingCredits: response.data.remainingCredits,
-        credits: response.data.credits
+        credits: response.data.credits,
+        success: true
       };
     } catch (error) {
       console.error('[PDFService] Text extraction error:', error);

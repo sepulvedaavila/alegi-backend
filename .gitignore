@@ -111,17 +111,8 @@ Thumbs.db
 *.zip
 function.zip 
 
-blueprint.json
-README2.md
-
-enhanced-processing-tables.sql
-QUEUE_SYSTEM.md
-QUEUE_IMPROVEMENTS_SUMMARY.md
 docs/
 examples/
 database-migrations/
 
-LINEAR_ARCHITECTURE.md
-scripts/update-cors.sh
-
-CLAUDE.md
+tests/
